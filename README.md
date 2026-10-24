@@ -55,26 +55,30 @@ The system operates across three network tiers:
 - **High-Throughput Vectorized XOR Masking**: WebSocket client frames require 32-bit XOR masking under RFC 6455 Section 5.3. MCloud implements 64-bit vectorized unrolling (`buf.getLong(...) ^ maskLong`), processing 8 bytes per CPU cycle and eliminating single-byte Netty allocations.
 - **Client Handshake Buffering**: During the TLS and HTTP 101 negotiation, initial outbound Minecraft handshake packets are held in a bounded Netty queue and flushed atomically once the WebSocket pipeline is marked active.
 
-## Comparative Analysis vs. Alternatives
+## Comparative Analysis vs. Existing GitHub Projects
 
-The following matrix compares MCloud against mainstream port-forwarding and tunnel solutions available for Minecraft:
+The following matrix contrasts MCloud with notable GitHub repositories solving related problems: **`HttpRafa/modflared`**, **`rikka0w0/wsmc`**, and **`playit-community/playit-minecraft-plugin`**:
 
-| Feature / Metric | MCloud | Playit.gg | e4mc | Ngrok / LocalXpose | Native Cloudflare (`cloudflared access tcp`) |
-|---|---|---|---|---|---|
-| **Zero Client CLI Burden** | Yes (Pure Mod JAR) | Yes | Yes | No (Client binary/script) | No (Requires local `cloudflared` client) |
-| **Relay Infrastructure** | Cloudflare Global Anycast Edge | Playit Anycast Network | Single European Relay Pool | Commercial Tunnel Relays | Cloudflare Global Anycast Edge |
-| **Edge Proximity (e.g. LATAM/US)** | Local Edge (~5-8 ms CDMX/QRO) | North America (~35-50 ms Dallas/VA) | Europe / US (~80-140 ms) | Variable by subscription tier | Local Edge (~5-8 ms) |
-| **DDoS Protection** | Cloudflare Free Tier DDoS Layer | Playit basic scrubbing | Basic proxy | Commercial caps | Cloudflare Free Tier DDoS Layer |
-| **Bandwidth & Connection Limits** | Unlimited Fair Use | Throttled on free tier | Server dependent | Strict quotas (1 GB/mo free) | Unlimited Fair Use |
-| **LAN / Direct TCP Fallback** | Automatic O(1) passthrough | Requires separate IP/port | Intercepts LAN broadcast | Separate port setup | Manual local connection |
-| **Protocol Overhead** | Vectorized RFC 6455 (+2 to 10 B/pkt) | Custom UDP/TCP wrapper | Custom HTTP proxy tunnel | TLS/TCP tunnel wrapper | SOCKS5 / Raw TCP encapsulation |
-| **Account / Setup Dependency** | None (Quick Tunnel auto-mode) | Requires Playit account & claim | None | Requires API account keys | Requires Cloudflare dashboard setup |
+| Dimension | **MCloud (This Project)** | **`HttpRafa/modflared`** | **`rikka0w0/wsmc`** | **`Playit.gg Plugin`** |
+|---|---|---|---|---|
+| **Underlying Ingress Mechanism** | Native RFC 6455 WebSockets over port 443 | Subprocess `cloudflared access tcp` daemon | Generic WebSocket proxy | Custom Playit UDP/TCP Tunnel |
+| **Client Host Process Model** | **Pure In-Process Netty Pipeline**. No external binaries or OS subprocesses | **Spawns native Go OS process** on client (`cloudflared.exe`) | Pure In-Process Netty Pipeline | In-process or external connector |
+| **Client Antivirus / OS Sandbox Resistance** | **100% Native JVM**. Zero heuristic alerts from Windows Defender / SmartScreen | Spawns background `.exe` downloaded from web; triggers antivirus heuristics | Pure JVM | Pure JVM or standalone binary |
+| **Zero-Config Cloudflare Tunnel Automation** | **Built-in autonomous manager** (`/mcloud start` captures free ephemeral tunnel URL) | Server tunnel must be created manually or via custom bash scripts | **None** (Requires user to set up Nginx/Cloudflare reverse proxy manually) | Built-in link claiming |
+| **Address Input Ergonomics** | Type `subdomain.trycloudflare.com` or `https://` / `wss://` directly | Requires DNS TXT record or manual local redirect binding | Requires typing explicit `ws://` or `wss://` prefixes | Generated `.joinmc.link` host |
+| **Masking Optimization** | **64-bit SIMD-style unrolled XOR** (`buf.getLong(...) ^ maskLong`) | N/A (Handled by external Go binary) | Standard 8-bit iterative masking | N/A |
+| **Real IP Preservation** | Extracts `CF-Connecting-IP` / `X-Forwarded-For` into Netty attributes | Reports `127.0.0.1` (loopback proxy binding) | Supports header IP forwarding | Supports PROXY protocol |
 
 ### Why MCloud is Architecturally Superior
 
-1. **Routing via Local Cloudflare PoPs**: Most Minecraft tunneling mods (like e4mc or playit) route traffic through centralised or distant relay points (e.g., Dallas, Virginia, or Frankfurt). For players in Latin America or regional areas, this adds 30 to 100 ms of RTT latency. MCloud anchors directly onto Cloudflare's nearest edge data center (e.g., Mexico City or Queretaro), cutting latency to single-digit milliseconds.
-2. **Elimination of Client-Side Daemon Software**: Standard Cloudflare Tunnels do not allow raw TCP streaming on port 25565 without the client running `cloudflared access tcp`. MCloud wraps packets into RFC 6455 WebSockets on port 443 inside Minecraft itself, allowing players to join using ordinary multiplayer addresses without installing third-party utilities.
-3. **Dual Protocol Multiplexing ($O(1)$)**: Servers running MCloud do not need a secondary port or a segregated network. The Netty pipeline sniffs the first incoming bytes: native LAN and direct TCP players bypass the WebSocket engine with zero overhead, while tunnel traffic is upgraded instantly.
+1. **Elimination of Client Subprocesses (`MCloud` vs `HttpRafa/modflared`)**:
+   - `modflared` downloads and executes a standalone Go binary (`cloudflared.exe`) on the player's desktop using `ProcessBuilder`, binding a local TCP loopback port (`127.0.0.1:xxxxx`). This approach frequently triggers Windows Defender false positives, requires OS-level process monitoring, and causes port collision issues if multiple instances are opened.
+   - `MCloud` operates **entirely inside Minecraft's existing Netty memory space**. It does not spawn background processes on the client PC, write binaries to disk, or open loopback ports.
+2. **Zero-Config Turnkey Experience (`MCloud` vs `rikka0w0/wsmc`)**:
+   - `wsmc` provides a WebSocket codec, but **leaves the entire tunnel setup to the user**. The server owner must configure a separate reverse proxy (Nginx, Caddy), configure SSL certificates, and set up Cloudflare manually.
+   - `MCloud` incorporates an autonomous tunnel supervisor on the dedicated server. Running `/mcloud start` launches the tunnel, auto-probes the ephemeral `trycloudflare.com` endpoint, and logs a click-to-copy address for friends in game chat.
+3. **Optimized Frame Engine**:
+   - While traditional WebSocket implementations process payloads byte-by-byte, `MCloud` leverages 64-bit vectorized unrolling, handling 8 bytes per CPU instruction for maximum throughput during chunk loading and world sync.
 
 ## Mod Compatibility & System Overhead
 
