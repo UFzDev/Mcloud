@@ -1,90 +1,115 @@
-# ☁️ MCloud — Cloudflare WebSocket Tunnel Engine for Minecraft (Fabric)
+# MCloud
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-brightgreen.svg)](https://fabricmc.net/)
-[![Fabric](https://img.shields.io/badge/Modloader-Fabric-lightgrey.svg)](https://fabricmc.net/)
-[![Cloudflare](https://img.shields.io/badge/Network-Cloudflare%20Edge-F38020.svg)](https://cloudflare.com)
+High-performance Fabric mod providing native RFC 6455 WebSocket tunneling and Zero-Config edge routing for Minecraft over Cloudflare Tunnels (port 443).
 
-**MCloud** es una solución de red de alto rendimiento diseñada para superar de forma definitiva los bloqueos de **CGNAT**, IPs dinámicas y restricciones de firewalls en servidores caseros de Minecraft. Convierte el tráfico TCP binario de Minecraft en túneles **WebSocket seguros (WSS)** sobre el puerto estándar **443**, aprovechando la infraestructura global gratuita de Cloudflare Tunnels (`trycloudflare.com` y dominios personalizados) sin requerir que los jugadores instalen `cloudflared` ni clientes externos en sus PCs.
+## Abstract
 
----
+Hosting dedicated Minecraft multiplayer servers behind residential Internet Service Providers (ISPs) frequently fails due to Carrier-Grade NAT (CGNAT, RFC 6598) and dynamic IP pools. Totalplay, Starlink, and mobile broadband providers do not assign globally routable IPv4 addresses to Customer Premises Equipment (CPE), making conventional port forwarding (TCP 25565) inoperative.
 
-## 🌟 Características Principales
+While Cloudflare offers free Edge Tunnels (`trycloudflare.com` and custom domains), the Cloudflare Free tier proxies only HTTP, HTTPS, and WebSocket (RFC 6455) protocols over port 443; raw TCP stream tunneling (`cloudflared access tcp`) requires every connecting client to install and configure local daemon software, adding unacceptable friction for multiplayer communities.
 
-1. **Bypass Completo de CGNAT**: Conecta jugadores externos a tu servidor local alojado en Totalplay, Megacable, Starlink o redes universitarias sin abrir puertos en el módem (cero port-forwarding).
-2. **Cero Clientes Externos para Jugadores**: Los jugadores solo necesitan tener el mod `mcloud.jar` en su carpeta `.minecraft/mods` y poner el dominio de Cloudflare (`wss://...` o `subdominio.trycloudflare.com`) en la pantalla de Multiplayer de Minecraft.
-3. **Dual Multiplexing O(1) en Servidor**: El servidor escucha en el puerto habitual `25565` e inspecciona los primeros bytes de cada conexión:
-   - Si detecta `GET / HTTP/1.1` con cabecera `Upgrade: websocket`, realiza el handshake RFC 6455 y conmuta a decodificación WebSocket.
-   - Si detecta un paquete Minecraft TCP nativo (`0xFE` o paquete Handshake VarInt), deja pasar la conexión como TCP directo sin sobrecarga alguna.
-4. **Baja Latencia Edge Local**: Enlace con los PoPs locales de Cloudflare en México (CDMX/Querétaro a ~5-8 ms), a diferencia de túneles alternativos (Playit.gg o ngrok) que enrutan tráfico por Dallas o Virginia (+35-50 ms).
-5. **Gestor Autónomo de Túnel (`cloudflared`)**: En el servidor, MCloud puede arrancar, supervisar y reconectar automáticamente el binario de `cloudflared` mediante comandos en el chat (`/mcloud start`, `/mcloud status`).
+MCloud eliminates external client binaries by encapsulating the Minecraft binary protocol directly within secure WebSocket (`wss://`) frames at the Netty pipeline level. Client players simply input their tunnel address into Minecraft's native server list.
 
----
+## Architecture
 
-## 📐 Arquitectura de Red
+The system operates across three network tiers:
 
 ```
-[ Jugador con MCloud ]
-         │ (Minecraft Protocol envuelto en WebSocket binario RFC 6455)
-         ▼
-[ HTTPS / WSS:443 Cloudflare Edge PoP (CDMX / QRO ~5ms) ]
-         │ (Túnel seguro Quick-Tunnel QUIC/HTTP2)
-         ▼
-[ cloudflared daemon (en Servidor Acer / Linux) ]
-         │ (HTTP Upgrade / Loopback)
-         ▼
-[ Servidor Minecraft Fabric + MCloud Multiplexer (Puerto 25565) ]
-         │
-         ├─── Si WebSocket: Decodifica frames RFC 6455 -> Pipeline Minecraft
-         └─── Si TCP Local (LAN): Conexión directa O(1) sin overhead
++-------------------------------------------------------------+
+|                     Minecraft Client                        |
+|                                                             |
+|   ConnectionClientConnectMixin                              |
+|   ServerAddressMixin: Normalizes URI (wss://, https://, etc)|
+|   SslHandler: TLS 1.3 encryption (SNI + Standard CA Trust)  |
+|   MCloudClientHandshakeHandler: RFC 6455 101 Handshake      |
+|   MCloudWebSocketFrameEncoder / Decoder (Vectorized XOR)    |
++------------------------------+------------------------------+
+                               |
+                               | TLS / WSS (Port 443)
+                               v
++-------------------------------------------------------------+
+|                Cloudflare Global Anycast Edge               |
+|                                                             |
+|   DDoS Mitigation, Zero-RTT Session Resumption              |
+|   Anycast Edge PoPs (CDMX, QRO, etc. ~5-8 ms RTT)           |
++------------------------------+------------------------------+
+                               |
+                               | QUIC / HTTP/2 Ingress Tunnel
+                               v
++-------------------------------------------------------------+
+|             Dedicated Server (Acer Server / Linux)          |
+|                                                             |
+|   cloudflared tunnel daemon (Local Ingress)                 |
+|   ServerConnectionListenerInitMixin                         |
+|   MCloudServerMultiplexer: Dual-Protocol O(1) Sniffer       |
+|      |- HTTP 101 WebSocket Upgrade -> Frame Codecs          |
+|      |- HTTP 200 JSON Probe -> Health check response        |
+|      \- Native Minecraft TCP -> Direct zero-overhead bypass |
+|   CloudflaredManager: Autonomous process supervision        |
++-------------------------------------------------------------+
 ```
 
----
+### Key Technical Specifications
 
-## 📦 Instalación
+- **Dual Protocol Multiplexing ($O(1)$)**: The server multiplexer inspects the first 4 bytes of incoming connections. Native Minecraft TCP handshakes (`0xFE` or VarInt length) immediately detach the multiplexer without packet modification or memory allocation. HTTP Upgrade requests trigger a 101 Switching Protocols response and install RFC 6455 codecs.
+- **High-Throughput Vectorized XOR Masking**: WebSocket client frames require 32-bit XOR masking under RFC 6455 Section 5.3. MCloud implements 64-bit vectorized unrolling (`buf.getLong(...) ^ maskLong`), processing 8 bytes per CPU cycle and eliminating single-byte Netty allocations.
+- **Client Handshake Buffering**: During the TLS and HTTP 101 negotiation, initial outbound Minecraft handshake packets are held in a bounded Netty queue and flushed atomically once the WebSocket pipeline is marked active.
 
-### Requisitos
-- **Minecraft**: `1.20.1`
-- **Mod Loader**: Fabric Loader `>= 0.16.0`
-- **Fabric API**: Instalado en el cliente y servidor.
-- **Java**: Java 17 o superior.
+## Installation
 
-### En el Cliente (Jugador)
-1. Coloca `mcloud-<version>.jar` dentro de tu carpeta `.minecraft/mods`.
-2. Inicia Minecraft.
-3. En la lista de servidores, introduce la URL del túnel (ejemplo: `subdominio-ejemplo.trycloudflare.com` o `wss://subdominio-ejemplo.trycloudflare.com:443`).
-4. ¡Conéctate directamente! MCloud interceptará la resolución DNS y establecerá la sesión TLS + WebSocket de forma transparente.
+### Client Requirements
+- Minecraft 1.20.1
+- Fabric Loader >= 0.15.0
+- Fabric API
 
-### En el Servidor
-1. Coloca `mcloud-<version>.jar` dentro de la carpeta `mods/` de tu servidor Fabric.
-2. (Opcional) Instala `cloudflared` en el sistema operativo del servidor si deseas que MCloud gestione el túnel automáticamente.
-3. Al encender el servidor, MCloud generará el archivo `config/mcloud.json`:
+Place `mcloud-<version>.jar` into the `.minecraft/mods` directory. Enter your Cloudflare tunnel domain (e.g. `subdomain.trycloudflare.com` or `wss://minecraft.yourdomain.com`) in the Multiplayer Server Address input field.
+
+### Server Requirements
+- Minecraft 1.20.1 Dedicated Server (Fabric)
+- Fabric API
+- Java 17 or higher
+- `cloudflared` binary available on system PATH or auto-downloaded by MCloud
+
+Place `mcloud-<version>.jar` into the server `mods/` directory.
+
+## Configuration
+
+A configuration file is generated at `config/mcloud.json` on initial boot:
 
 ```json
 {
   "enabled": true,
   "listenPort": 25565,
-  "autoStartTunnel": true,
-  "cloudflaredPath": "cloudflared",
-  "tunnelDomain": "",
-  "clientMasking": true,
-  "pingIntervalSeconds": 30
+  "autoStartCloudflared": true,
+  "autoDownloadCloudflared": true,
+  "tunnelMode": "quick",
+  "tunnelToken": "",
+  "customCloudflareDomains": []
 }
 ```
 
----
+### Configuration Keys
 
-## 🎮 Comandos de Servidor
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `true` | Enables or disables MCloud Netty handlers. |
+| `listenPort` | integer | `25565` | Target local port for incoming Minecraft connections. |
+| `autoStartCloudflared` | boolean | `true` | Spawns `cloudflared` on server startup. |
+| `autoDownloadCloudflared` | boolean | `true` | Downloads official Cloudflare binaries if not found on PATH. |
+| `tunnelMode` | string | `"quick"` | `"quick"` for temporary trycloudflare.com; `"token"` for Zero Trust custom domains. |
+| `tunnelToken` | string | `""` | Zero Trust tunnel authentication token when using token mode. |
+| `customCloudflareDomains` | list | `[]` | List of custom domain names routed through Cloudflare. |
 
-- `/mcloud status`: Muestra el estado del multiplexor WebSocket, clientes conectados y la URL activa del túnel Cloudflare.
-- `/mcloud start`: Arranca el proceso autónomo de `cloudflared` y obtiene una URL pública `trycloudflare.com`.
-- `/mcloud stop`: Detiene el túnel activo.
+## Commands
 
----
+Server operators (permission level 2) have access to the `/mcloud` command suite:
 
-## 🛠️ Compilación desde Código Fuente
+- `/mcloud status`: Displays tunnel status, process health, and click-to-copy active tunnel endpoint.
+- `/mcloud start`: Launches the `cloudflared` daemon process and logs the public hostname.
+- `/mcloud stop`: Terminates the active tunnel daemon.
+- `/mcloud restart`: Restarts the tunnel process and refreshes public endpoint binding.
 
-El proyecto utiliza Gradle 9 y Fabric Loom:
+## Building from Source
 
 ```bash
 git clone https://github.com/UFzDev/Mcloud.git
@@ -92,10 +117,8 @@ cd Mcloud
 ./gradlew build
 ```
 
-El archivo compilado listo para producción se encontrará en `build/libs/mcloud-<version>.jar`.
+Compiled binaries are output to `build/libs/mcloud-<version>.jar`.
 
----
+## License
 
-## ⚖️ Licencia
-
-Distribuido bajo la Licencia MIT. Consulta el archivo [LICENSE](LICENSE) para más detalles.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

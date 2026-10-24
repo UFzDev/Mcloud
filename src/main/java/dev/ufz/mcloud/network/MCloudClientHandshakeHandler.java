@@ -19,7 +19,7 @@ import java.util.List;
 public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
     private final String host;
     private final String path;
-    private final String expectedAcceptKey;
+    private String expectedAcceptKey;
     private boolean handshakeComplete = false;
     private final ByteBuf cumulationBuffer = Unpooled.buffer(2048);
     private final List<QueuedWrite> pendingWrites = new ArrayList<>();
@@ -37,6 +37,8 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
         MCloudMod.LOGGER.info("[MCloud] Initiating WebSocket upgrade handshake to {}{}", host, path);
         String clientKey = MCloudWebSocketUtil.generateClientKey();
+        this.expectedAcceptKey = MCloudWebSocketUtil.computeAcceptKey(clientKey);
+
         String request = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: " + host + "\r\n"
                 + "Upgrade: websocket\r\n"

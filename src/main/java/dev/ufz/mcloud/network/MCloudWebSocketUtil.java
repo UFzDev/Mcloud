@@ -44,13 +44,42 @@ public final class MCloudWebSocketUtil {
 
     /**
      * Applies XOR masking/unmasking in-place on a ByteBuf between readerIndex and writerIndex.
+     * Uses vectorised 64-bit (long) processing followed by residual bytes for maximum Netty throughput.
      */
     public static void applyMask(ByteBuf buf, byte[] maskKey) {
+        if (maskKey == null || maskKey.length != 4) {
+            return;
+        }
+
         int start = buf.readerIndex();
         int len = buf.readableBytes();
-        for (int i = 0; i < len; i++) {
-            int idx = start + i;
-            buf.setByte(idx, buf.getByte(idx) ^ maskKey[i & 3]);
+        if (len == 0) {
+            return;
+        }
+
+        // Precompute 64-bit repeated mask key [m0, m1, m2, m3, m0, m1, m2, m3]
+        long m0 = maskKey[0] & 0xFFL;
+        long m1 = maskKey[1] & 0xFFL;
+        long m2 = maskKey[2] & 0xFFL;
+        long m3 = maskKey[3] & 0xFFL;
+        long maskLong = (m0 << 56) | (m1 << 48) | (m2 << 40) | (m3 << 32)
+                      | (m0 << 24) | (m1 << 16) | (m2 << 8)  | m3;
+
+        int longBlocks = len >>> 3; // divide by 8
+        int idx = start;
+
+        for (int i = 0; i < longBlocks; i++) {
+            long val = buf.getLong(idx);
+            buf.setLong(idx, val ^ maskLong);
+            idx += 8;
+        }
+
+        int remainder = len & 7;
+        int offset = (len - remainder);
+        for (int i = 0; i < remainder; i++) {
+            int currentIdx = idx + i;
+            int maskIdx = (offset + i) & 3;
+            buf.setByte(currentIdx, buf.getByte(currentIdx) ^ maskKey[maskIdx]);
         }
     }
 }

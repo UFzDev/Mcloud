@@ -45,10 +45,14 @@ public class MCloudWebSocketFrameEncoder extends MessageToByteEncoder<ByteBuf> {
             byte[] maskKey = new byte[]{m0, m1, m2, m3};
             out.writeBytes(maskKey);
 
-            int readerIdx = msg.readerIndex();
-            for (int i = 0; i < len; i++) {
-                out.writeByte(msg.getByte(readerIdx + i) ^ maskKey[i & 3]);
-            }
+            int startWrite = out.writerIndex();
+            out.writeBytes(msg, msg.readerIndex(), len);
+
+            // Apply in-place vectorized XOR mask directly on the destination buffer
+            int prevReader = out.readerIndex();
+            out.readerIndex(startWrite);
+            MCloudWebSocketUtil.applyMask(out, maskKey);
+            out.readerIndex(prevReader);
         } else {
             out.writeBytes(msg, msg.readerIndex(), len);
         }
