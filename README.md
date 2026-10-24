@@ -90,6 +90,17 @@ The following matrix contrasts MCloud with notable GitHub repositories solving r
 - **Network Protocol Overhead**: Adds between 2 and 10 bytes per packet. On an average Minecraft packet stream of 20 to 50 KB/s per player, this accounts for less than 0.01% extra bandwidth.
 - **Modpack Compatibility**: Compatible with Fabric rendering engines (`Sodium`, `Iris`, `Indium`, `Nvidium`), network optimizers (`Packet Fixer`, `ModernFix`), voice chat modules (`Simple Voice Chat` on UDP 24454), and large content mods (`Create`, `Farmers Delight`, `Sophisticated Backpacks`).
 
+## Downloads
+
+Precompiled release binaries ready to drop into your `mods/` folder are available on GitHub Releases:
+
+- **Latest Release Binary (`mcloud-1.0.0.jar`)**: [Download from GitHub Releases](https://github.com/UFzDev/Mcloud/releases)
+
+To install:
+1. Download `mcloud-1.0.0.jar`.
+2. Move it to your `.minecraft/mods` folder (for players) or your server's `mods/` directory (for server admins).
+3. Ensure you have Fabric Loader (>= 0.15.0) and Fabric API installed.
+
 ## Installation
 
 ### Client Requirements
