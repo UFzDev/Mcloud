@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "mcloud",
+  "version": "${version}",
+  "name": "MCloud",
+  "description": "Cloudflare WebSocket & Zero-Config Tunnel Engine for Minecraft. Bypass CGNAT and play with ultra-low local Edge latency using free Cloudflare tunnels without client CLI tools.",
+  "authors": [
+    "UFzDev"
+  ],
+  "contact": {
+    "homepage": "https://github.com/UFzDev/Mcloud",
+    "sources": "https://github.com/UFzDev/Mcloud",
+    "issues": "https://github.com/UFzDev/Mcloud/issues"
+  },
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "dev.ufz.mcloud.MCloudMod"
+    ]
+  },
+  "mixins": [
+    "mcloud.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": "~1.20.1",
+    "java": ">=17",
+    "fabric-api": "*"
+  }
+}
