@@ -150,6 +150,15 @@ cd Mcloud
 
 Compiled binaries are output to `build/libs/mcloud-<version>.jar`.
 
+## Authorship & Contributions
+
+MCloud is an open-source engineering project designed, created, and maintained by **[UFzDev](https://github.com/UFzDev)**.
+
+All bug reports, feature discussions, and code contributions must be submitted exclusively upstream through the official repository to preserve protocol integrity:
+
+- **Official Repository**: [https://github.com/UFzDev/Mcloud](https://github.com/UFzDev/Mcloud)
+- **Contribution Guidelines**: Please review [CONTRIBUTING.md](CONTRIBUTING.md) before opening pull requests.
+
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License with explicit author attribution. See the [LICENSE](LICENSE) file for details.
