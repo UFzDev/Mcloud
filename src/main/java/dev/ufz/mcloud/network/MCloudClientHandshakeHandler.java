@@ -7,6 +7,7 @@ import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.ChannelPromise;
+import io.netty.handler.ssl.SslHandler;
 import io.netty.util.ReferenceCountUtil;
 
 import java.nio.charset.StandardCharsets;
@@ -22,6 +23,7 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
     private final String host;
     private final String path;
     private String expectedAcceptKey;
+    private boolean handshakeInitiated = false;
     private boolean handshakeComplete = false;
     private final ByteBuf cumulationBuffer = Unpooled.buffer(2048);
     private final List<QueuedWrite> pendingWrites = new ArrayList<>();
@@ -37,6 +39,28 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        if (handshakeInitiated) {
+            // Already initiated or completed, ignore redundant channelActive calls
+            return;
+        }
+        handshakeInitiated = true;
+
+        SslHandler sslHandler = ctx.pipeline().get(SslHandler.class);
+        if (sslHandler != null) {
+            sslHandler.handshakeFuture().addListener(future -> {
+                if (future.isSuccess()) {
+                    sendUpgradeRequest(ctx);
+                } else {
+                    MCloudMod.LOGGER.error("[MCloud] SSL handshake failed towards {}", host, future.cause());
+                    ctx.close();
+                }
+            });
+        } else {
+            sendUpgradeRequest(ctx);
+        }
+    }
+
+    private void sendUpgradeRequest(ChannelHandlerContext ctx) {
         MCloudMod.LOGGER.info("[MCloud] Initiating WebSocket upgrade handshake to {}{}", host, path);
         String clientKey = MCloudWebSocketUtil.generateClientKey();
         this.expectedAcceptKey = MCloudWebSocketUtil.computeAcceptKey(clientKey);
@@ -51,7 +75,6 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
 
         ByteBuf reqBuf = Unpooled.copiedBuffer(request, StandardCharsets.US_ASCII);
         ctx.writeAndFlush(reqBuf);
-        // Do not call ctx.fireChannelActive() yet: wait for 101 Switching Protocols!
     }
 
     @Override
@@ -81,7 +104,14 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
 
                 ChannelPipeline pipeline = ctx.pipeline();
 
-                // Install WebSocket codecs directly adjacent to SSL
+                ByteBuf remainder = cumulationBuffer.isReadable()
+                        ? cumulationBuffer.readRetainedSlice(cumulationBuffer.readableBytes())
+                        : null;
+
+                // 1. Remove this handshake handler first so it never intercepts anything downstream
+                pipeline.remove(this);
+
+                // 2. Install WebSocket codecs directly adjacent to SSL (or first if no SSL)
                 if (pipeline.get("mcloud_ssl") != null) {
                     pipeline.addAfter("mcloud_ssl", "mcloud_client_ws_encoder", new MCloudWebSocketFrameEncoder(true));
                     pipeline.addAfter("mcloud_ssl", "mcloud_client_ws_decoder", new MCloudWebSocketFrameDecoder(true));
@@ -90,21 +120,19 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
                     pipeline.addFirst("mcloud_client_ws_decoder", new MCloudWebSocketFrameDecoder(true));
                 }
 
-                // If any remaining bytes came after \r\n\r\n, forward them into the new WebSocket decoder
-                if (cumulationBuffer.isReadable()) {
-                    ByteBuf remainder = cumulationBuffer.readRetainedSlice(cumulationBuffer.readableBytes());
+                MCloudMod.LOGGER.info("[MCloud] Client pipeline active: {}", pipeline.names());
+
+                // 3. Fire remaining bytes if any arrived with the handshake response
+                if (remainder != null) {
                     pipeline.context("mcloud_client_ws_decoder").fireChannelRead(remainder);
                 }
 
-                // Fire channelActive from the pipeline so Connection and all handlers receive it properly!
+                // 4. Notify pipeline that channel is active now that WebSocket tunnel is 100% open!
+                // Since this handler was already removed, pipeline.fireChannelActive() starts at head
+                // and propagates cleanly down through SslHandler -> ws_decoder -> timeout -> Connection
                 pipeline.fireChannelActive();
 
-                // Now remove the handshake handler from the pipeline cleanly
-                pipeline.remove(this);
-
-                MCloudMod.LOGGER.info("[MCloud] Client pipeline active: {}", pipeline.names());
-
-                // Flush any writes that were buffered during handshake directly through ws_encoder!
+                // 5. Flush any writes that were buffered during handshake directly through ws_encoder!
                 if (!pendingWrites.isEmpty()) {
                     MCloudMod.LOGGER.info("[MCloud] Flushing {} queued outbound packets through WebSocket encoder", pendingWrites.size());
                     ChannelHandlerContext wsEncoderCtx = pipeline.context("mcloud_client_ws_encoder");
