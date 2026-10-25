@@ -35,7 +35,15 @@ public class CloudflaredManager {
     private static final AtomicReference<String> activeUrl = new AtomicReference<>(null);
     private static final AtomicBoolean running = new AtomicBoolean(false);
 
+    public interface TunnelListener {
+        void onTunnelReady(String tunnelUrl);
+    }
+
     public static synchronized void start(int localPort) {
+        start(localPort, null);
+    }
+
+    public static synchronized void start(int localPort, TunnelListener listener) {
         if (running.get()) {
             MCloudMod.LOGGER.info("[MCloud] Cloudflared is already running at {}", activeUrl.get());
             return;
@@ -75,6 +83,13 @@ public class CloudflaredManager {
                             MCloudMod.LOGGER.info("[MCloud] Share this server address with your friends:");
                             MCloudMod.LOGGER.info("[MCloud] >>> {} <<<", foundUrl.replace("https://", ""));
                             MCloudMod.LOGGER.info("==========================================================");
+                            if (listener != null) {
+                                try {
+                                    listener.onTunnelReady(foundUrl.replace("https://", ""));
+                                } catch (Exception e) {
+                                    MCloudMod.LOGGER.error("[MCloud] Error notifying tunnel listener", e);
+                                }
+                            }
                         }
                     }
                 } catch (IOException ignored) {

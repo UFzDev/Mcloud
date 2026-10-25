@@ -11,7 +11,8 @@
   ],
   "client": [
     "ServerAddressMixin",
-    "ServerNameResolverMixin"
+    "ServerNameResolverMixin",
+    "IntegratedServerLanMixin"
   ],
   "injectors": {
     "defaultRequire": 1

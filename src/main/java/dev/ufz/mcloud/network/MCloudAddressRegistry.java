@@ -107,6 +107,37 @@ public final class MCloudAddressRegistry {
         return remainder;
     }
 
+    private static final Map<String, Boolean> DNS_CACHE = new ConcurrentHashMap<>();
+
+    /**
+     * Checks whether a custom domain has a Cloudflare / MCloud TXT record (_mcloud.domain).
+     * If present, automatically enables WebSocket tunneling without forcing the player to type wss://.
+     */
+    public static boolean checkDnsTxtRecord(String domain) {
+        if (domain == null || domain.isBlank()) return false;
+        String hostLower = domain.toLowerCase(Locale.ROOT);
+        Boolean cached = DNS_CACHE.get(hostLower);
+        if (cached != null) {
+            return cached;
+        }
+
+        try {
+            java.util.Hashtable<String, String> env = new java.util.Hashtable<>();
+            env.put("java.naming.factory.initial", "com.sun.jndi.dns.DnsContextFactory");
+            env.put("com.sun.jndi.dns.timeout.initial", "1000"); // 1s timeout
+            env.put("com.sun.jndi.dns.timeout.retries", "1");
+            javax.naming.directory.DirContext ctx = new javax.naming.directory.InitialDirContext(env);
+            javax.naming.directory.Attributes attrs = ctx.getAttributes("_mcloud." + hostLower, new String[]{"TXT"});
+            if (attrs != null && attrs.get("TXT") != null) {
+                DNS_CACHE.put(hostLower, true);
+                return true;
+            }
+        } catch (Exception ignored) {
+        }
+
+        DNS_CACHE.put(hostLower, false);
+        return false;
+    }
     public static boolean isCloudflareTunnelDomain(String host) {
         if (host == null || host.isBlank()) {
             return false;
@@ -120,7 +151,7 @@ public final class MCloudAddressRegistry {
                 return true;
             }
         }
-        return false;
+        return checkDnsTxtRecord(h);
     }
 
     /**
