@@ -21,3 +21,8 @@ run/
 # OS
 .DS_Store
 Thumbs.db
+
+# Internal Agent Notes & Confidential Instructions
+AGENTS.md
+CLAUDE.md
+.agents/
