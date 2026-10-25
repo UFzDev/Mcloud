@@ -1,10 +1,24 @@
-﻿<p align="center">
+<p align="center">
   <img src="assets/header.png?v=banner-flagship" alt="MCloud Header" width="100%" />
 </p>
 
 # MCloud
 
 A high-performance, zero-config Fabric mod that tunnels Minecraft TCP traffic through Cloudflare Tunnels (port 443) using RFC 6455 WebSockets over TLS.
+
+---
+
+## Supported Minecraft Versions
+
+MCloud is fully maintained and tested across three release tracks:
+
+| Minecraft Version | Release Track | Git Branch | Recommended Binary | Java Requirement |
+| :--- | :--- | :--- | :--- | :--- |
+| **Minecraft 1.20.1** | Long-Term Support (LTS) | [`main`](https://github.com/UFzDev/Mcloud/tree/main) | `mcloud-1.1.0-mc1.20.x.jar` | Java 17+ |
+| **Minecraft 1.21 – 1.21.11** | Modern Track | [`1.21`](https://github.com/UFzDev/Mcloud/tree/1.21) | `mcloud-1.1.0-mc1.21.x.jar` | Java 21+ |
+| **Minecraft 26.x (26.1 – 26.3+)** | Next-Gen / Calendar Versioning | [`26.x`](https://github.com/UFzDev/Mcloud/tree/26.x) | `mcloud-1.1.0-mc26.x.jar` | Java 21+ |
+
+*Both the Host/Server and joining Clients only need the corresponding MCloud jar file in their `mods/` folder.*
 
 ---
 
@@ -77,24 +91,24 @@ Traditional workarounds come with significant trade-offs:
 
 ## Getting Started
 
-### Option A: Play with Friends from Singleplayer ("Open to LAN")
+### Option A: Play with Friends from Singleplayer
 1. Open your Singleplayer world.
-2. Press `Esc` and click **Open to LAN**.
-3. Choose your settings and click **Start LAN World**.
-4. MCloud will automatically provision a secure Cloudflare tunnel and print a clickable link in your chat:
+2. Open the world to your friends:
+   - **On 1.20.x & 1.21.x**: Press `Esc` and click **Open to LAN** -> **Start LAN World**.
+   - **On 26.x**: Press `Esc` and open the world via **World Options...** / **Opciones del mundo...**, or simply run `/mcloud start` in chat.
+3. MCloud will automatically provision a free, secure Cloudflare tunnel in the background and print a clickable link directly in your chat:
    ```text
-   [MCloud] PUBLIC WORLD ONLINE!
-   Share this address with your friends:
-   >>> swift-rabbit-123.trycloudflare.com <<<
-   (Click link to copy directly to clipboard)
+   MCloud » Free Cloudflare tunnel online!
+   Share: abc-def-123.trycloudflare.com
+   [COPY LINK]
    ```
-5. Click the link to copy it, send it to your friends, and they can join immediately! When you exit the world, the tunnel closes automatically.
+4. Click **[COPY LINK]** to copy the address to your clipboard, send it to your friends, and they can join immediately! When you exit the world or close the server, the tunnel shuts down automatically.
 
 ---
 
 ### Option B: Dedicated Server Setup
-1. Install **Fabric Loader (1.20.1)** on your server.
-2. Place `mcloud-1.1.0.jar` into the `mods/` directory.
+1. Install **Fabric Loader** on your server (matches your Minecraft version: 1.20.1, 1.21.x, or 26.x).
+2. Place the matching `mcloud-1.1.0-mc<version>.jar` into the `mods/` directory.
 3. Start the server. MCloud will generate `config/mcloud.json` and can automatically supervise `cloudflared`.
 4. Alternatively, start a quick tunnel manually in your terminal:
    ```bash
@@ -136,14 +150,15 @@ Add this TXT record so the MCloud client automatically recognizes your domain wi
 ---
 
 ### Joining a Server (Clients)
-1. Install **Fabric Loader (1.20.1)** and place `mcloud-1.1.0.jar` in your `mods/` directory.
-2. In Minecraft, open **Multiplayer** -> **Add Server**.
-3. Paste the tunnel address in **Server Address**:
+1. Install **Fabric Loader** on your client matching the server's Minecraft version.
+2. Place the matching `mcloud-1.1.0-mc<version>.jar` in your `mods/` directory.
+3. In Minecraft, open **Multiplayer** -> **Add Server** (or Direct Connection).
+4. Paste the tunnel address in **Server Address**:
    ```text
    your-domain.trycloudflare.com
    ```
    *(or your custom domain like `mc.yourdomain.com`)*
-4. Click **Done** and connect. Server status, player count, MOTD, and gameplay work identically to vanilla.
+5. Click **Done** and connect. Server status, ping, player count, MOTD, and gameplay work identically to vanilla.
 
 ---
 
@@ -188,15 +203,26 @@ Operators (level 2+) can manage the tunnel on dedicated servers:
 
 ## Building from Source
 
-Requirements: **Java 17+**
+Select the branch for your target Minecraft version:
 
 ```bash
 git clone https://github.com/UFzDev/Mcloud.git
 cd Mcloud
+
+# For Minecraft 1.20.1 LTS:
+git checkout main
+./gradlew build
+
+# For Minecraft 1.21.x:
+git checkout 1.21
+./gradlew build
+
+# For Minecraft 26.x:
+git checkout 26.x
 ./gradlew build
 ```
 
-The compiled mod JAR will be generated at `build/libs/mcloud-1.1.0.jar`.
+Compiled mod JARs will be found in `build/libs/`.
 
 ---
 
