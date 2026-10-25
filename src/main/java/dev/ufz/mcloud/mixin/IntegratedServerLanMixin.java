@@ -32,52 +32,56 @@ public class IntegratedServerLanMixin {
         MCloudMod.LOGGER.info("[MCloud] IntegratedServer opened to LAN on local port {}. Starting Cloudflare tunnel...", port);
 
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player != null) {
-            MutableComponent startingMsg = Component.empty()
-                    .append(Component.literal("MCloud ").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
-                    .append(Component.literal("» ").withStyle(ChatFormatting.DARK_GRAY))
-                    .append(Component.literal("Creating secure Cloudflare tunnel...").withStyle(ChatFormatting.GRAY));
+        MutableComponent startingMsg = Component.empty()
+                .append(Component.literal("MCloud ").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
+                .append(Component.literal("» ").withStyle(ChatFormatting.DARK_GRAY))
+                .append(Component.literal("Creating secure Cloudflare tunnel...").withStyle(ChatFormatting.GRAY));
 
-            mc.player.sendSystemMessage(startingMsg);
-        }
+        sendChatMessage(mc, startingMsg);
 
         CloudflaredManager.start(port, tunnelDomain -> {
             // Ensure UI/Chat message is scheduled on Minecraft's main client thread
             mc.execute(() -> {
-                if (mc.player != null) {
-                    MutableComponent copyButton = Component.literal("[COPY LINK]")
-                            .withStyle(style -> style
-                                    .withColor(ChatFormatting.GREEN)
-                                    .withBold(true)
-                                    .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, tunnelDomain))
-                                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                            Component.literal("Click to copy address to clipboard").withStyle(ChatFormatting.GREEN)))
-                            );
+                MutableComponent copyButton = Component.literal("[COPY LINK]")
+                        .withStyle(style -> style
+                                .withColor(ChatFormatting.GREEN)
+                                .withBold(true)
+                                .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, tunnelDomain))
+                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                        Component.literal("Click to copy address to clipboard").withStyle(ChatFormatting.GREEN)))
+                        );
 
-                    MutableComponent domainText = Component.literal(tunnelDomain)
-                            .withStyle(style -> style
-                                    .withColor(ChatFormatting.AQUA)
-                                    .withUnderlined(true)
-                                    .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, tunnelDomain))
-                                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                            Component.literal("Click to copy address to clipboard").withStyle(ChatFormatting.GREEN)))
-                            );
+                MutableComponent domainText = Component.literal(tunnelDomain)
+                        .withStyle(style -> style
+                                .withColor(ChatFormatting.AQUA)
+                                .withUnderlined(true)
+                                .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, tunnelDomain))
+                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                        Component.literal("Click to copy address to clipboard").withStyle(ChatFormatting.GREEN)))
+                        );
 
-                    MutableComponent message = Component.empty()
-                            .append(Component.literal("----------------------------------------\n").withStyle(ChatFormatting.DARK_GRAY))
-                            .append(Component.literal("MCloud ").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
-                            .append(Component.literal("» ").withStyle(ChatFormatting.DARK_GRAY))
-                            .append(Component.literal("Public world is now ONLINE!\n").withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD))
-                            .append(Component.literal("Address: ").withStyle(ChatFormatting.GRAY))
-                            .append(domainText)
-                            .append(Component.literal("  "))
-                            .append(copyButton)
-                            .append(Component.literal("\n----------------------------------------").withStyle(ChatFormatting.DARK_GRAY));
+                MutableComponent message = Component.empty()
+                        .append(Component.literal("----------------------------------------\n").withStyle(ChatFormatting.DARK_GRAY))
+                        .append(Component.literal("MCloud ").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
+                        .append(Component.literal("» ").withStyle(ChatFormatting.DARK_GRAY))
+                        .append(Component.literal("Public world is now ONLINE!\n").withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD))
+                        .append(Component.literal("Address: ").withStyle(ChatFormatting.GRAY))
+                        .append(domainText)
+                        .append(Component.literal("  "))
+                        .append(copyButton)
+                        .append(Component.literal("\n----------------------------------------").withStyle(ChatFormatting.DARK_GRAY));
 
-                    mc.player.sendSystemMessage(message);
-                }
+                sendChatMessage(mc, message);
             });
         });
+    }
+
+    private static void sendChatMessage(Minecraft mc, Component component) {
+        if (mc.gui != null && mc.gui.getChat() != null) {
+            mc.gui.getChat().addMessage(component);
+        } else if (mc.player != null) {
+            mc.player.sendSystemMessage(component);
+        }
     }
 
     @Inject(method = "halt(Z)V", at = @At("HEAD"))
