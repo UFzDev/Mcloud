@@ -1,100 +1,92 @@
-# MCloud ??
+ï»¿# MCloud
 
-Zero-Port-Forwarding, Zero-Client-Daemons, Free Cloudflare Tunnel & WebSocket Bridge for Minecraft (Fabric 1.20.1).
-
----
-
-## ? What is MCloud?
-
-Hosting dedicated Minecraft servers from home frequently fails due to **Carrier-Grade NAT (CGNAT)**, mobile broadband, or strict firewall routers that prevent port forwarding (25565).
-
-Traditional alternatives suffer from critical pain points:
-- **Hamachi / Radmin VPN**: Requires all friends to install virtual network adapters, exposes local subnet traffic, and caps network speeds.
-- **Playit.gg / Ngrok**: Bandwidth limits or high subscription fees.
-- **Vanilla Cloudflare Tunnels**: Cloudflare's free tier only proxies **HTTP/HTTPS and WebSockets (port 443)**. Raw TCP tunneling (cloudflared access tcp) requires every player to install CLI daemons and configure custom client proxies.
-
-**MCloud solves this natively at the Netty pipeline layer.** It encapsulates Minecraft’s binary packet stream into secure RFC 6455 WebSocket (wss://) frames over port 443. Connecting players simply paste the Cloudflare tunnel URL into their normal Minecraft multiplayer screen—**no VPNs, no router modifications, and zero external software for clients.**
+A high-performance, zero-config Fabric mod that tunnels Minecraft TCP traffic through Cloudflare Tunnels (port 443) using RFC 6455 WebSockets over TLS.
 
 ---
 
-## ??? Architecture
+## The Problem MCloud Solves
 
-`
-+---------------------------------------------------------------+
-|                      Minecraft Client                         |
-|                                                               |
-|  - ConnectionClientConnectMixin: Routes to Port 443           |
-|  - ServerAddressMixin: Normalizes URI (*.trycloudflare.com)  |
-|  - SslHandler: Standard CA TLS 1.3 Encryption                 |
-|  - MCloudClientHandshakeHandler: RFC 6455 101 Handshake       |
-|  - ConnectionChannelActiveMixin: Flushes queued game packets  |
-|  - MCloudWebSocketFrameEncoder / Decoder (Vectorized XOR)     |
-+-------------------------------+-------------------------------+
-                                |
-                                | TLS 1.3 / WSS (Port 443)
-                                v
-+---------------------------------------------------------------+
-|                 Cloudflare Global Edge Anycast                |
-|                                                               |
-|  - Free Anycast CDN & Anti-DDoS Shield                        |
-|  - Hides your real home IP address completely                 |
-|  - Zero-RTT Session Resumption (5-15 ms edge latency)         |
-+-------------------------------+-------------------------------+
-                                |
-                                | QUIC / HTTP2 Ingress Tunnel
-                                v
-+---------------------------------------------------------------+
-|              Dedicated Server (Linux / Mac / Windows)         |
-|                                                               |
-|  - cloudflared tunnel daemon (Local Ingress)                  |
-|  - ServerConnectionListenerInitMixin                          |
-|  - MCloudServerMultiplexer: O(1) Zero-Copy Protocol Sniffer   |
-|     * WebSocket Upgrade -> Strips frames & injects to Netty   |
-|     * Native Minecraft TCP -> Direct zero-overhead bypass     |
-|     * HTTP /mcloud Probe -> Health check response             |
-|  - CloudflaredManager: Autonomous tunnel supervisor           |
-+-------------------------------+-------------------------------+
-`
+Hosting dedicated Minecraft multiplayer servers behind residential Internet Service Providers (ISPs) often fails due to **Carrier-Grade NAT (CGNAT)** or strict home routers that prevent opening port `25565`.
+
+Traditional workarounds come with significant trade-offs:
+- **Hamachi / Radmin VPN**: Every player must install a third-party VPN client and virtual network adapter, traffic is capped, and local subnets are exposed.
+- **Playit.gg / Ngrok**: Free tiers enforce strict bandwidth/tunnel limits or add noticeable routing latency.
+- **Standard Cloudflare Tunnels**: Cloudflare's free ingress tier only proxies **HTTP/HTTPS and WebSockets over port 443**. Running raw TCP (`cloudflared access tcp`) requires every single player to install command-line tools and configure local proxy ports.
+
+**MCloud eliminates all external client software.** It bridges Minecraft packets directly into secure WebSocket (`wss://`) frames at the Netty pipeline layer. Players simply enter the Cloudflare tunnel domain into the vanilla Minecraft multiplayer list.
 
 ---
 
-## ?? Feature Comparison Matrix
+## How It Works
 
-| Feature | MCloud ?? | Hamachi / Radmin | Playit.gg / Ngrok | Classic Port Forwarding |
+```
+[ Minecraft Client ]
+  |
+  +-- ConnectionClientConnectMixin (Redirects tunnel to port 443)
+  +-- SslHandler (TLS 1.3 encryption with standard CA trust)
+  +-- MCloudClientHandshakeHandler (Performs RFC 6455 HTTP 101 upgrade)
+  +-- ConnectionChannelActiveMixin (Flushes buffered packets upon handshake)
+  +-- MCloudWebSocketFrameEncoder / Decoder (Vectorized 64-bit XOR masking)
+  |
+  v  (Encrypted WSS / Port 443)
+[ Cloudflare Anycast Edge ]
+  |
+  +-- Free DDoS mitigation & edge caching
+  +-- Masks home IP address completely
+  +-- Low edge latency (5-15 ms RTT to nearest PoP)
+  |
+  v  (QUIC / HTTP2 Tunnel Ingress)
+[ Dedicated Server (Host) ]
+  |
+  +-- cloudflared daemon (Supervised locally)
+  +-- MCloudServerMultiplexer (O(1) protocol sniffer)
+       |-- HTTP 101 Upgrade -> Strips WebSocket frames into raw packets
+       \-- Native Minecraft TCP -> Direct zero-overhead passthrough
+```
+
+---
+
+## Comparison
+
+| Feature | MCloud | Hamachi / Radmin | Playit.gg / Ngrok | Direct Port Forward |
 | :--- | :---: | :---: | :---: | :---: |
-| **Port Forwarding Required** | ? **No** | ? **No** | ? **No** | ? Yes (Needs Public IP) |
-| **Friends Must Install VPN/Client** | ? **No (Mod only)** | ?? Yes (Heavy VPN) | ? No | ? No |
-| **Bandwidth / Cap Limits** | ? **Unlimited (CDN)** | ?? P2P Throttled | ?? Throttled on Free | ?? ISP Dependent |
-| **IP Protection / Anti-DDoS** | ??? **Full Cloudflare Shield** | ?? Subnet Exposed | ??? Proxied | ? Home IP Exposed |
-| **Cost** | ?? **100% Free** | ?? Free with limits | ?? Paid for full speed | ?? Free |
+| **Port Forwarding Needed** | No | No | No | Yes |
+| **Client VPN / Software** | No (Mod only) | Yes (Required) | No | No |
+| **Bandwidth Limits** | Unlimited | Throttled | Limited on Free | ISP dependent |
+| **IP Protection (Anti-DDoS)** | Cloudflare CDN | Exposed | Proxied | Home IP exposed |
+| **Cost** | 100% Free | Free w/ limits | Paid for full speed | Free |
 
 ---
 
-## ?? Quick Start Guide
+## Getting Started
 
-### For the Server Host
-1. Install **Fabric Loader** (1.20.1) and place mcloud-1.0.13.jar into your mods/ directory.
-2. Start the server. By default, MCloud will generate config/mcloud.json and automatically supervise cloudflared.
-3. Alternatively, run an ad-hoc tunnel manually:
-   `ash
+### 1. Server Setup
+1. Install **Fabric Loader (1.20.1)** on your server.
+2. Place `mcloud-1.0.13.jar` into the `mods/` directory.
+3. Start the server. MCloud will generate `config/mcloud.json` and can automatically supervise `cloudflared`.
+4. Alternatively, start a quick tunnel manually in your terminal:
+   ```bash
    cloudflared tunnel --url http://127.0.0.1:25565
-   `
-4. Copy the generated public URL (e.g., your-tunnel-name.trycloudflare.com).
+   ```
+5. Copy the generated domain (e.g. `your-domain.trycloudflare.com`).
 
-### For Joining Players (Clients)
-1. Install Fabric Loader (1.20.1) and put mcloud-1.0.13.jar in your client mods/ folder.
-2. In Minecraft, navigate to **Multiplayer** -> **Add Server**.
-3. In **Server Address**, paste your Cloudflare tunnel domain:
-   `	ext
-   your-tunnel-name.trycloudflare.com
-   `
-4. Hit **Done** and join! Ping, MOTD, player counts, skins, and gameplay synchronize automatically.
+### 2. Client Setup
+1. Install **Fabric Loader (1.20.1)**.
+2. Put `mcloud-1.0.13.jar` into your client `mods/` directory.
+3. In Minecraft, open **Multiplayer** -> **Add Server**.
+4. Paste the tunnel address in **Server Address**:
+   ```text
+   your-domain.trycloudflare.com
+   ```
+5. Click **Done** and connect. Server status, player count, MOTD, and gameplay work identically to vanilla.
 
 ---
 
-## ?? Configuration (config/mcloud.json)
+## Configuration
 
-`json
+The configuration file is located at `config/mcloud.json`:
+
+```json
 {
   "enabled": true,
   "listenPort": 25565,
@@ -104,46 +96,46 @@ Traditional alternatives suffer from critical pain points:
   "tunnelToken": "",
   "customCloudflareDomains": []
 }
-`
+```
 
-| Key | Type | Default | Description |
-|---|---|---|---|
-| enabled | boolean | 	rue | Enables or disables MCloud Netty pipeline hooks. |
-| listenPort | integer | 25565 | Target local port where Minecraft listens. |
-| utoStartCloudflared | boolean | 	rue | Automatically spawns the tunnel process on boot. |
-| utoDownloadCloudflared | boolean | 	rue | Downloads official Cloudflare binaries if not found on PATH. |
-| 	unnelMode | string | "quick" | "quick" for temporary trycloudflare.com; "token" for Zero Trust custom domains. |
-| 	unnelToken | string | "" | Zero Trust Tunnel token for persistent custom domains. |
-| customCloudflareDomains | list | [] | List of custom domain names routed through Cloudflare. |
-
----
-
-## ??? In-Game Commands
-
-Operators with permission level 2 have access to /mcloud:
-
-- /mcloud status: Displays tunnel process status, edge latency, and click-to-copy active domain.
-- /mcloud start: Launches the background cloudflared tunnel daemon.
-- /mcloud stop: Terminates the active tunnel daemon.
-- /mcloud restart: Restarts the tunnel and refreshes the public endpoint.
+| Key | Default | Description |
+|---|---|---|
+| `enabled` | `true` | Enables or disables MCloud Netty handlers. |
+| `listenPort` | `25565` | Target local port for the Minecraft server. |
+| `autoStartCloudflared` | `true` | Automatically spawns the cloudflared process on launch. |
+| `autoDownloadCloudflared` | `true` | Downloads the official cloudflared binary if missing. |
+| `tunnelMode` | `"quick"` | `"quick"` for temporary trycloudflare.com, or `"token"` for Zero Trust named tunnels. |
+| `tunnelToken` | `""` | Authentication token when using Zero Trust named tunnels. |
+| `customCloudflareDomains` | `[]` | List of custom domain names routed through Cloudflare. |
 
 ---
 
-## ?? Building from Source
+## In-Game Commands
 
-Requires **JDK 17** or higher:
+Operators (level 2+) can manage the tunnel in-game:
 
-`ash
+- `/mcloud status` - View tunnel status, health, and active URL.
+- `/mcloud start` - Start the cloudflared daemon.
+- `/mcloud stop` - Stop the active tunnel daemon.
+- `/mcloud restart` - Restart the tunnel daemon and refresh the endpoint.
+
+---
+
+## Building from Source
+
+Requirements: **Java 17+**
+
+```bash
 git clone https://github.com/UFzDev/Mcloud.git
 cd Mcloud
 ./gradlew build
-`
+```
 
-Compiled jar will be located at uild/libs/mcloud-1.0.13.jar.
+The compiled mod JAR will be generated at `build/libs/mcloud-1.0.13.jar`.
 
 ---
 
-## ?? License
+## License
 
-MCloud is licensed under the [MIT License](LICENSE).
-Created with ?? by **[UFzDev](https://github.com/UFzDev)**.
+This project is licensed under the [MIT License](LICENSE).  
+Created by **[UFzDev](https://github.com/UFzDev)**.
