@@ -4,30 +4,32 @@ import dev.ufz.mcloud.MCloudMod;
 import dev.ufz.mcloud.tunnel.CloudflaredManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.server.IntegratedServer;
+import net.minecraft.client.server.LanServerPinger;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.world.level.GameType;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.lang.reflect.Constructor;
 
 /**
- * Automatically spawns a Cloudflare tunnel and posts the public URL in the player's chat
- * when the game is opened to LAN.
+ * Intercepts LanServerPinger creation and lifecycle across all Minecraft versions (1.20, 1.21, 26.x).
+ * When a singleplayer game is opened to LAN or multiplayer, LanServerPinger is spawned with (motd, port).
  */
-@Mixin(IntegratedServer.class)
-public class IntegratedServerLanMixin {
+@Mixin(LanServerPinger.class)
+public class LanServerPingerMixin {
 
-    @Inject(method = "publishServer", at = @At("RETURN"))
-    private void mcloud(GameType gameMode, boolean cheats, int port, CallbackInfoReturnable<Boolean> cir) {
-        if (!cir.getReturnValue()) {
+    @Inject(method = "<init>(Ljava/lang/String;Ljava/lang/String;)V", at = @At("RETURN"))
+    private void mcloud$onLanStarted(String motd, String portString, CallbackInfo ci) {
+        int port;
+        try {
+            port = Integer.parseInt(portString);
+        } catch (NumberFormatException e) {
+            MCloudMod.LOGGER.error("[MCloud] Failed to parse LAN server port: {}", portString, e);
             return;
         }
 
@@ -77,6 +79,14 @@ public class IntegratedServerLanMixin {
                 sendChatMessage(mc, message);
             });
         });
+    }
+
+    @Inject(method = "interrupt()V", at = @At("HEAD"))
+    private void mcloud$onLanStopped(CallbackInfo ci) {
+        if (CloudflaredManager.isRunning()) {
+            MCloudMod.LOGGER.info("[MCloud] Singleplayer LAN world closed. Shutting down active tunnel...");
+            CloudflaredManager.stop();
+        }
     }
 
     private static ClickEvent createCopyClickEvent(String text) {
@@ -179,14 +189,6 @@ public class IntegratedServerLanMixin {
             mc.gui.getChat().addMessage(component);
         } else if (mc.player != null) {
             mc.player.sendSystemMessage(component);
-        }
-    }
-
-    @Inject(method = "halt(Z)V", at = @At("HEAD"))
-    private void mcloud(boolean waitForShutdown, CallbackInfo ci) {
-        if (CloudflaredManager.isRunning()) {
-            MCloudMod.LOGGER.info("[MCloud] Singleplayer world closing. Shutting down active tunnel...");
-            CloudflaredManager.stop();
         }
     }
 }
