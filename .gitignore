@@ -1,4 +1,4 @@
-# Gradle
+﻿# Gradle
 .gradle/
 build/
 out/
@@ -14,9 +14,11 @@ bin/
 .classpath
 .project
 
-# Fabric / Loom
+# Fabric / Loom / Logs
 run/
+logs/
 *.log
+*.log.gz
 
 # OS
 .DS_Store
