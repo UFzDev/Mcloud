@@ -9,7 +9,8 @@
     "ConnectionClientInitMixin"
   ],
   "client": [
-    "ServerAddressMixin"
+    "ServerAddressMixin",
+    "ServerNameResolverMixin"
   ],
   "injectors": {
     "defaultRequire": 1
