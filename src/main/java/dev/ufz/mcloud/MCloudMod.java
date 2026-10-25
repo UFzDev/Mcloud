@@ -52,7 +52,7 @@ public class MCloudMod implements ModInitializer {
 
     private void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("mcloud")
-                .requires(source -> source.hasPermission(2))
+                // permission check handled inside execution
                 .then(Commands.literal("status")
                         .executes(ctx -> {
                             CommandSourceStack src = ctx.getSource();
