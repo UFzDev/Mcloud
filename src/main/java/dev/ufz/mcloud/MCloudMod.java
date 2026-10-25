@@ -48,7 +48,7 @@ public class MCloudMod implements ModInitializer {
         });
     }
 
-    private void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
+    public static void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("mcloud")
                 .then(Commands.literal("status")
                         .executes(ctx -> {

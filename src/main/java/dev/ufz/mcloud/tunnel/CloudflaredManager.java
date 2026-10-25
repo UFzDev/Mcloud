@@ -39,71 +39,82 @@ public class CloudflaredManager {
         void onTunnelReady(String tunnelUrl);
     }
 
-    public static synchronized void start(int localPort) {
+    public static void start(int localPort) {
         start(localPort, null);
     }
 
-    public static synchronized void start(int localPort, TunnelListener listener) {
+    public static void start(int localPort, TunnelListener listener) {
         if (running.get()) {
             MCloudMod.LOGGER.info("[MCloud] Cloudflared is already running at {}", activeUrl.get());
             return;
         }
 
-        MCloudConfig config = MCloudConfig.get();
-        Path binary = findOrDownloadCloudflared(config);
-        if (binary == null) {
-            MCloudMod.LOGGER.error("[MCloud] Could not find or download cloudflared executable! Please install cloudflared manually.");
-            return;
-        }
+        // Run binary discovery, download and process launching completely asynchronously
+        // to NEVER freeze Minecraft's Render / GUI thread
+        Thread launchThread = new Thread(() -> {
+            synchronized (CloudflaredManager.class) {
+                if (running.get()) return;
 
-        try {
-            ProcessBuilder pb;
-            if ("token".equalsIgnoreCase(config.tunnelMode) && config.tunnelToken != null && !config.tunnelToken.isBlank()) {
-                MCloudMod.LOGGER.info("[MCloud] Launching cloudflared with custom domain Zero Trust token...");
-                pb = new ProcessBuilder(binary.toString(), "tunnel", "run", "--token", config.tunnelToken);
-            } else {
-                MCloudMod.LOGGER.info("[MCloud] Launching cloudflared in Quick Tunnel mode for port {}...", localPort);
-                pb = new ProcessBuilder(binary.toString(), "tunnel", "--url", "http://127.0.0.1:" + localPort);
-            }
+                MCloudConfig config = MCloudConfig.get();
+                Path binary = findOrDownloadCloudflared(config);
+                if (binary == null) {
+                    MCloudMod.LOGGER.error("[MCloud] Could not find or download cloudflared executable! Please install cloudflared manually.");
+                    return;
+                }
 
-            pb.redirectErrorStream(true);
-            process = pb.start();
-            running.set(true);
+                try {
+                    ProcessBuilder pb;
+                    if ("token".equalsIgnoreCase(config.tunnelMode) && config.tunnelToken != null && !config.tunnelToken.isBlank()) {
+                        MCloudMod.LOGGER.info("[MCloud] Launching cloudflared with custom domain Zero Trust token...");
+                        pb = new ProcessBuilder(binary.toString(), "tunnel", "run", "--token", config.tunnelToken);
+                    } else {
+                        MCloudMod.LOGGER.info("[MCloud] Launching cloudflared in Quick Tunnel mode for port {}...", localPort);
+                        pb = new ProcessBuilder(binary.toString(), "tunnel", "--url", "http://127.0.0.1:" + localPort);
+                    }
 
-            Thread logThread = new Thread(() -> {
-                try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        Matcher matcher = URL_PATTERN.matcher(line);
-                        if (matcher.find()) {
-                            String foundUrl = matcher.group();
-                            activeUrl.set(foundUrl);
-                            MCloudMod.LOGGER.info("==========================================================");
-                            MCloudMod.LOGGER.info("[MCloud] FREE CLOUDFLARE MINECRAFT TUNNEL ONLINE!");
-                            MCloudMod.LOGGER.info("[MCloud] Share this server address with your friends:");
-                            MCloudMod.LOGGER.info("[MCloud] >>> {} <<<", foundUrl.replace("https://", ""));
-                            MCloudMod.LOGGER.info("==========================================================");
-                            if (listener != null) {
-                                try {
-                                    listener.onTunnelReady(foundUrl.replace("https://", ""));
-                                } catch (Exception e) {
-                                    MCloudMod.LOGGER.error("[MCloud] Error notifying tunnel listener", e);
+                    pb.redirectErrorStream(true);
+                    process = pb.start();
+                    running.set(true);
+
+                    Thread logThread = new Thread(() -> {
+                        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                            String line;
+                            while ((line = reader.readLine()) != null) {
+                                Matcher matcher = URL_PATTERN.matcher(line);
+                                if (matcher.find()) {
+                                    String foundUrl = matcher.group();
+                                    activeUrl.set(foundUrl);
+                                    MCloudMod.LOGGER.info("==========================================================");
+                                    MCloudMod.LOGGER.info("[MCloud] FREE CLOUDFLARE MINECRAFT TUNNEL ONLINE!");
+                                    MCloudMod.LOGGER.info("[MCloud] Share this server address with your friends:");
+                                    MCloudMod.LOGGER.info("[MCloud] >>> {} <<<", foundUrl.replace("https://", ""));
+                                    MCloudMod.LOGGER.info("==========================================================");
+                                    if (listener != null) {
+                                        try {
+                                            listener.onTunnelReady(foundUrl.replace("https://", ""));
+                                        } catch (Exception e) {
+                                            MCloudMod.LOGGER.error("[MCloud] Error notifying tunnel listener", e);
+                                        }
+                                    }
                                 }
                             }
+                        } catch (IOException ignored) {
+                        } finally {
+                            running.set(false);
+                            activeUrl.set(null);
                         }
-                    }
-                } catch (IOException ignored) {
-                } finally {
-                    running.set(false);
-                    activeUrl.set(null);
-                }
-            }, "MCloud-Cloudflared-Monitor");
-            logThread.setDaemon(true);
-            logThread.start();
+                    }, "MCloud-Cloudflared-Monitor");
+                    logThread.setDaemon(true);
+                    logThread.start();
 
-        } catch (IOException e) {
-            MCloudMod.LOGGER.error("[MCloud] Failed to start cloudflared process", e);
-        }
+                } catch (Exception e) {
+                    MCloudMod.LOGGER.error("[MCloud] Failed to start cloudflared process", e);
+                    running.set(false);
+                }
+            }
+        }, "MCloud-Cloudflared-Launcher");
+        launchThread.setDaemon(true);
+        launchThread.start();
     }
 
     public static synchronized void stop() {

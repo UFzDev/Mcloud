@@ -6,7 +6,8 @@
   "mixins": [
     "ServerConnectionListenerInitMixin",
     "ConnectionClientInitMixin",
-    "ConnectionChannelActiveMixin"
+    "ConnectionChannelActiveMixin",
+    "CommandsMixin"
   ],
   "client": [
     "ServerAddressMixin",
