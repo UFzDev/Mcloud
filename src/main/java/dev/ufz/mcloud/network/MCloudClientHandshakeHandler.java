@@ -78,21 +78,32 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
                 MCloudMod.LOGGER.info("[MCloud] WebSocket tunnel established successfully to {}", host);
                 handshakeComplete = true;
 
-                // Install WebSocket frame encoder and decoder for the client
-                ctx.pipeline().addBefore(ctx.name(), "mcloud_client_ws_encoder", new MCloudWebSocketFrameEncoder(true));
-                ctx.pipeline().addAfter(ctx.name(), "mcloud_client_ws_decoder", new MCloudWebSocketFrameDecoder(true));
+                // OUTBOUND: Place mcloud_client_ws_encoder before "prepender" (so it wraps the final framed ByteBuf before SSL)
+                // INBOUND: Place mcloud_client_ws_decoder before "splitter" (so it unwraps WebSocket binary payload before Minecraft splitter/decoder)
+                if (ctx.pipeline().get("prepender") != null) {
+                    ctx.pipeline().addBefore("prepender", "mcloud_client_ws_encoder", new MCloudWebSocketFrameEncoder(true));
+                } else {
+                    ctx.pipeline().addBefore(ctx.name(), "mcloud_client_ws_encoder", new MCloudWebSocketFrameEncoder(true));
+                }
+
+                if (ctx.pipeline().get("splitter") != null) {
+                    ctx.pipeline().addBefore("splitter", "mcloud_client_ws_decoder", new MCloudWebSocketFrameDecoder(true));
+                } else {
+                    ctx.pipeline().addAfter(ctx.name(), "mcloud_client_ws_decoder", new MCloudWebSocketFrameDecoder(true));
+                }
+
+                MCloudMod.LOGGER.info("[MCloud] Client pipeline after installing codecs: {}", ctx.pipeline().names());
 
                 // If any remaining bytes came after \r\n\r\n, forward them into the new WebSocket decoder BEFORE channelActive
                 if (cumulationBuffer.isReadable()) {
                     ByteBuf remainder = cumulationBuffer.readRetainedSlice(cumulationBuffer.readableBytes());
-                    ctx.fireChannelRead(remainder);
+                    ctx.pipeline().context("mcloud_client_ws_decoder").fireChannelRead(remainder);
                 }
 
-                // Remove handshake handler once completed so it does not intercept subsequent Minecraft packets
+                // Remove handshake handler once completed
                 ctx.pipeline().remove(this);
 
-                // Now notify Minecraft's Connection handler that the channel is active.
-                // In vanilla Minecraft, Connection.channelActive() is what sends the initial Handshake packet!
+                // Notify Minecraft that connection is now ready to send/receive packets
                 ctx.fireChannelActive();
 
                 // Flush any writes that were buffered
@@ -113,7 +124,6 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         if (!handshakeComplete) {
-            // Buffer ANY outbound message (Packet or ByteBuf) until WebSocket handshake is established
             pendingWrites.add(new QueuedWrite(msg, promise));
         } else {
             ctx.write(msg, promise);
