@@ -46,6 +46,8 @@ public class MCloudClientConnectHandler extends ChannelOutboundHandlerAdapter {
             MCloudMod.LOGGER.info("[MCloud] Configuring SSL and WebSocket pipeline for target: {}:{} ({})",
                     endpoint.host(), endpoint.port(), endpoint.path());
 
+            MCloudMod.LOGGER.info("[MCloud] Current client pipeline before injection: {}", ctx.pipeline().names());
+
             if (endpoint.useTls()) {
                 SslContext ssl = getSslContext();
                 if (ssl != null) {
@@ -63,6 +65,8 @@ public class MCloudClientConnectHandler extends ChannelOutboundHandlerAdapter {
 
             // Once configured, remove this connect interceptor from the pipeline
             ctx.pipeline().remove(this);
+
+            MCloudMod.LOGGER.info("[MCloud] Pipeline after injection: {}", ctx.pipeline().names());
         }
 
         super.connect(ctx, remoteAddress, localAddress, promise);

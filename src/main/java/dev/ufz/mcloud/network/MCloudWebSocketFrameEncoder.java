@@ -1,5 +1,6 @@
 package dev.ufz.mcloud.network;
 
+import dev.ufz.mcloud.MCloudMod;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.MessageToByteEncoder;
@@ -22,6 +23,8 @@ public class MCloudWebSocketFrameEncoder extends MessageToByteEncoder<ByteBuf> {
         if (len == 0) {
             return;
         }
+
+        MCloudMod.LOGGER.info("[MCloud] Encoding WebSocket binary frame: {} bytes (mask={})", len, maskPayload);
 
         out.writeByte(0x82); // FIN=1, Opcode=2 (Binary Frame)
         int maskFlag = maskPayload ? 0x80 : 0x00;
