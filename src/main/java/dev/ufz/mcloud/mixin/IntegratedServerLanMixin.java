@@ -8,6 +8,7 @@ import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.level.GameType;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -32,37 +33,48 @@ public class IntegratedServerLanMixin {
 
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) {
-            mc.player.sendSystemMessage(
-                    Component.literal("[MCloud] ")
-                            .withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD)
-                            .append(Component.literal("Creating Cloudflare Tunnel for friends...").withStyle(ChatFormatting.GRAY))
-            );
+            MutableComponent startingMsg = Component.empty()
+                    .append(Component.literal("MCloud ").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
+                    .append(Component.literal("» ").withStyle(ChatFormatting.DARK_GRAY))
+                    .append(Component.literal("Creating secure Cloudflare tunnel...").withStyle(ChatFormatting.GRAY));
+
+            mc.player.sendSystemMessage(startingMsg);
         }
 
         CloudflaredManager.start(port, tunnelDomain -> {
             // Ensure UI/Chat message is scheduled on Minecraft's main client thread
             mc.execute(() -> {
                 if (mc.player != null) {
-                    Component linkComponent = Component.literal(tunnelDomain)
+                    MutableComponent copyButton = Component.literal("[COPY LINK]")
                             .withStyle(style -> style
                                     .withColor(ChatFormatting.GREEN)
-                                    .withUnderlined(true)
                                     .withBold(true)
                                     .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, tunnelDomain))
-                                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("Click to copy tunnel address")))
+                                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                            Component.literal("Click to copy address to clipboard").withStyle(ChatFormatting.GREEN)))
                             );
 
-                    mc.player.sendSystemMessage(
-                            Component.literal("\n========================================\n")
-                                    .withStyle(ChatFormatting.DARK_AQUA)
-                                    .append(Component.literal("  [MCloud] PUBLIC WORLD ONLINE!\n").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
-                                    .append(Component.literal("  Share this address with your friends:\n").withStyle(ChatFormatting.YELLOW))
-                                    .append(Component.literal("  >>> ").withStyle(ChatFormatting.AQUA))
-                                    .append(linkComponent)
-                                    .append(Component.literal(" <<<\n").withStyle(ChatFormatting.AQUA))
-                                    .append(Component.literal("  (Click link to copy directly to clipboard)\n").withStyle(ChatFormatting.DARK_GRAY))
-                                    .append(Component.literal("========================================\n").withStyle(ChatFormatting.DARK_AQUA))
-                    );
+                    MutableComponent domainText = Component.literal(tunnelDomain)
+                            .withStyle(style -> style
+                                    .withColor(ChatFormatting.AQUA)
+                                    .withUnderlined(true)
+                                    .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, tunnelDomain))
+                                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                            Component.literal("Click to copy address to clipboard").withStyle(ChatFormatting.GREEN)))
+                            );
+
+                    MutableComponent message = Component.empty()
+                            .append(Component.literal("----------------------------------------\n").withStyle(ChatFormatting.DARK_GRAY))
+                            .append(Component.literal("MCloud ").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
+                            .append(Component.literal("» ").withStyle(ChatFormatting.DARK_GRAY))
+                            .append(Component.literal("Public world is now ONLINE!\n").withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD))
+                            .append(Component.literal("Address: ").withStyle(ChatFormatting.GRAY))
+                            .append(domainText)
+                            .append(Component.literal("  "))
+                            .append(copyButton)
+                            .append(Component.literal("\n----------------------------------------").withStyle(ChatFormatting.DARK_GRAY));
+
+                    mc.player.sendSystemMessage(message);
                 }
             });
         });
