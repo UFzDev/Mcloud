@@ -5,7 +5,9 @@ import dev.ufz.mcloud.tunnel.CloudflaredManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.server.IntegratedServer;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.level.GameType;
 import org.spongepowered.asm.mixin.Mixin;
@@ -13,6 +15,8 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+import java.lang.reflect.Constructor;
 
 /**
  * Automatically spawns a Cloudflare tunnel and posts the public URL in the player's chat
@@ -40,46 +44,134 @@ public class IntegratedServerLanMixin {
         CloudflaredManager.start(port, tunnelDomain -> {
             // Ensure UI/Chat message is scheduled on Minecraft's main client thread
             mc.execute(() -> {
-                MutableComponent message = null;
+                ClickEvent copyClickEvent = createCopyClickEvent(tunnelDomain);
+                HoverEvent copyHoverEvent = createShowTextHoverEvent("Click to copy address to clipboard");
 
-                // Try to parse full clickable and copy-to-clipboard JSON text component via registry access
-                if (mc.level != null) {
-                    try {
-                        String rawJson = String.format(
-                                "{\"text\":\"\",\"extra\":["
-                                        + "{\"text\":\"----------------------------------------\\n\",\"color\":\"dark_gray\"},"
-                                        + "{\"text\":\"MCloud \",\"color\":\"gold\",\"bold\":true},"
-                                        + "{\"text\":\"» \",\"color\":\"dark_gray\"},"
-                                        + "{\"text\":\"Public world is now ONLINE!\\n\",\"color\":\"white\",\"bold\":true},"
-                                        + "{\"text\":\"Address: \",\"color\":\"gray\"},"
-                                        + "{\"text\":\"%s\",\"color\":\"aqua\",\"underlined\":true,\"clickEvent\":{\"action\":\"copy_to_clipboard\",\"value\":\"%s\"},\"hoverEvent\":{\"action\":\"show_text\",\"value\":\"Click to copy address\"}},"
-                                        + "{\"text\":\"  \"},"
-                                        + "{\"text\":\"[COPY LINK]\",\"color\":\"green\",\"bold\":true,\"clickEvent\":{\"action\":\"copy_to_clipboard\",\"value\":\"%s\"},\"hoverEvent\":{\"action\":\"show_text\",\"value\":\"Click to copy address\"}},"
-                                        + "{\"text\":\"\\n----------------------------------------\",\"color\":\"dark_gray\"}"
-                                        + "]}",
-                                tunnelDomain, tunnelDomain, tunnelDomain
-                        );
+                MutableComponent copyButton = Component.literal("[COPY LINK]")
+                        .withStyle(style -> {
+                            style = style.withColor(ChatFormatting.GREEN).withBold(true);
+                            if (copyClickEvent != null) style = style.withClickEvent(copyClickEvent);
+                            if (copyHoverEvent != null) style = style.withHoverEvent(copyHoverEvent);
+                            return style;
+                        });
 
-                        message = Component.Serializer.fromJson(rawJson, mc.level.registryAccess());
-                    } catch (Throwable t) {
-                        MCloudMod.LOGGER.warn("[MCloud] Registry-aware JSON parsing failed, using clean fallback", t);
-                    }
-                }
+                MutableComponent domainText = Component.literal(tunnelDomain)
+                        .withStyle(style -> {
+                            style = style.withColor(ChatFormatting.AQUA).withUnderlined(true);
+                            if (copyClickEvent != null) style = style.withClickEvent(copyClickEvent);
+                            if (copyHoverEvent != null) style = style.withHoverEvent(copyHoverEvent);
+                            return style;
+                        });
 
-                if (message == null) {
-                    message = Component.empty()
-                            .append(Component.literal("----------------------------------------\n").withStyle(ChatFormatting.DARK_GRAY))
-                            .append(Component.literal("MCloud ").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
-                            .append(Component.literal("» ").withStyle(ChatFormatting.DARK_GRAY))
-                            .append(Component.literal("Public world is now ONLINE!\n").withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD))
-                            .append(Component.literal("Address: ").withStyle(ChatFormatting.GRAY))
-                            .append(Component.literal(tunnelDomain).withStyle(ChatFormatting.AQUA, ChatFormatting.UNDERLINE))
-                            .append(Component.literal("\n----------------------------------------").withStyle(ChatFormatting.DARK_GRAY));
-                }
+                MutableComponent message = Component.empty()
+                        .append(Component.literal("----------------------------------------\n").withStyle(ChatFormatting.DARK_GRAY))
+                        .append(Component.literal("MCloud ").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
+                        .append(Component.literal("» ").withStyle(ChatFormatting.DARK_GRAY))
+                        .append(Component.literal("Public world is now ONLINE!\n").withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD))
+                        .append(Component.literal("Address: ").withStyle(ChatFormatting.GRAY))
+                        .append(domainText)
+                        .append(Component.literal("  "))
+                        .append(copyButton)
+                        .append(Component.literal("\n----------------------------------------").withStyle(ChatFormatting.DARK_GRAY));
 
                 sendChatMessage(mc, message);
             });
         });
+    }
+
+    private static ClickEvent createCopyClickEvent(String text) {
+        // 1. Try modern 1.21.2+ CopyToClipboard record
+        try {
+            Class<?> copyClass = null;
+            for (String className : new String[]{
+                    "net.minecraft.network.chat.ClickEvent$CopyToClipboard",
+                    "net.minecraft.text.ClickEvent$CopyToClipboard",
+                    "net.minecraft.class_2558$class_10606"
+            }) {
+                try {
+                    copyClass = Class.forName(className);
+                    break;
+                } catch (ClassNotFoundException ignored) {
+                }
+            }
+
+            if (copyClass != null) {
+                Constructor<?> ctor = copyClass.getDeclaredConstructor(String.class);
+                ctor.setAccessible(true);
+                return (ClickEvent) ctor.newInstance(text);
+            }
+        } catch (Throwable ignored) {
+        }
+
+        // 2. Fallback to pre-1.21.2 ClickEvent(Action.COPY_TO_CLIPBOARD, String)
+        try {
+            for (Constructor<?> ctor : ClickEvent.class.getDeclaredConstructors()) {
+                if (ctor.getParameterCount() == 2) {
+                    Class<?> p1 = ctor.getParameterTypes()[0];
+                    Class<?> p2 = ctor.getParameterTypes()[1];
+                    if (p1.isEnum() && p2 == String.class) {
+                        for (Object constant : p1.getEnumConstants()) {
+                            if (constant.toString().equals("COPY_TO_CLIPBOARD")) {
+                                ctor.setAccessible(true);
+                                return (ClickEvent) ctor.newInstance(constant, text);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        return null;
+    }
+
+    private static HoverEvent createShowTextHoverEvent(String text) {
+        // 1. Try modern 1.21.2+ ShowText record
+        try {
+            Class<?> showTextClass = null;
+            for (String className : new String[]{
+                    "net.minecraft.network.chat.HoverEvent$ShowText",
+                    "net.minecraft.text.HoverEvent$ShowText",
+                    "net.minecraft.class_2568$class_10607"
+            }) {
+                try {
+                    showTextClass = Class.forName(className);
+                    break;
+                } catch (ClassNotFoundException ignored) {
+                }
+            }
+
+            if (showTextClass != null) {
+                for (Constructor<?> ctor : showTextClass.getDeclaredConstructors()) {
+                    if (ctor.getParameterCount() == 1 && Component.class.isAssignableFrom(ctor.getParameterTypes()[0])) {
+                        ctor.setAccessible(true);
+                        return (HoverEvent) ctor.newInstance(Component.literal(text));
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        // 2. Fallback to pre-1.21.2 HoverEvent(Action.SHOW_TEXT, Component)
+        try {
+            for (Constructor<?> ctor : HoverEvent.class.getDeclaredConstructors()) {
+                if (ctor.getParameterCount() == 2) {
+                    Class<?> p1 = ctor.getParameterTypes()[0];
+                    Class<?> p2 = ctor.getParameterTypes()[1];
+                    if (p1.isEnum() && Component.class.isAssignableFrom(p2)) {
+                        for (Object constant : p1.getEnumConstants()) {
+                            if (constant.toString().equals("SHOW_TEXT")) {
+                                ctor.setAccessible(true);
+                                return (HoverEvent) ctor.newInstance(constant, Component.literal(text));
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        return null;
     }
 
     private static void sendChatMessage(Minecraft mc, Component component) {
