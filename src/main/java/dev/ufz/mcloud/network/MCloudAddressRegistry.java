@@ -1,5 +1,8 @@
 package dev.ufz.mcloud.network;
 
+import io.netty.util.AttributeKey;
+
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.Locale;
 import java.util.Map;
@@ -10,9 +13,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * Tracks and normalizes server addresses that should be connected via MCloud WebSocket tunnels.
  */
 public final class MCloudAddressRegistry {
+    public static final AttributeKey<EndpointInfo> ENDPOINT_ATTR = AttributeKey.valueOf("mcloud_endpoint_info");
+
     public record EndpointInfo(String host, int port, boolean useTls, String path) {}
 
     private static final Map<String, EndpointInfo> EXPLICIT_ENDPOINTS = new ConcurrentHashMap<>();
+    private static final Map<String, EndpointInfo> IP_TO_ENDPOINT = new ConcurrentHashMap<>();
     private static final Set<String> CUSTOM_DOMAINS = ConcurrentHashMap.newKeySet();
 
     private MCloudAddressRegistry() {}
@@ -25,20 +31,18 @@ public final class MCloudAddressRegistry {
 
     public static void clear() {
         EXPLICIT_ENDPOINTS.clear();
+        IP_TO_ENDPOINT.clear();
         CUSTOM_DOMAINS.clear();
+    }
+
+    public static void mapIpToEndpoint(String ip, EndpointInfo endpoint) {
+        if (ip != null && endpoint != null) {
+            IP_TO_ENDPOINT.put(ip, endpoint);
+        }
     }
 
     /**
      * Normalizes user-entered server addresses from the Minecraft Multiplayer menu.
-     * Supports:
-     * - https://words.trycloudflare.com
-     * - wss://mc.example.com
-     * - ws://127.0.0.1:25565
-     * - mcloud://mc.example.com
-     * - words.trycloudflare.com
-     *
-     * @param rawInput Raw string typed/pasted into Server Address box
-     * @return Clean host[:port] string suitable for vanilla ServerAddress.parseString()
      */
     public static String normalizeServerAddressInput(String rawInput) {
         if (rawInput == null) {
@@ -81,7 +85,6 @@ public final class MCloudAddressRegistry {
         String host = remainder;
         int explicitPort = -1;
         int colonIdx = remainder.lastIndexOf(':');
-        // Ensure it's not an IPv6 literal bracket
         if (colonIdx > 0 && remainder.indexOf(':') == colonIdx) {
             String portPart = remainder.substring(colonIdx + 1);
             try {
@@ -128,30 +131,34 @@ public final class MCloudAddressRegistry {
             return null;
         }
         String host = address.getHostString();
-        if (host == null) {
-            return null;
-        }
-        String hostLower = host.toLowerCase(Locale.ROOT);
+        if (host != null) {
+            String hostLower = host.toLowerCase(Locale.ROOT);
+            EndpointInfo registered = EXPLICIT_ENDPOINTS.get(hostLower);
+            if (registered != null) {
+                int port = (address.getPort() != 25565 && address.getPort() > 0)
+                        ? address.getPort()
+                        : registered.port();
+                return new EndpointInfo(host, port, registered.useTls(), registered.path());
+            }
 
-        EndpointInfo registered = EXPLICIT_ENDPOINTS.get(hostLower);
-        if (registered != null) {
-            int port = (address.getPort() != 25565 && address.getPort() > 0)
-                    ? address.getPort()
-                    : registered.port();
-            return new EndpointInfo(host, port, registered.useTls(), registered.path());
+            if (isCloudflareTunnelDomain(hostLower)) {
+                int port = (address.getPort() == 25565 || address.getPort() <= 0) ? 443 : address.getPort();
+                return new EndpointInfo(host, port, true, "/mcloud");
+            }
         }
 
-        if (isCloudflareTunnelDomain(hostLower)) {
-            int port = (address.getPort() == 25565 || address.getPort() <= 0) ? 443 : address.getPort();
-            return new EndpointInfo(host, port, true, "/mcloud");
+        InetAddress inetAddress = address.getAddress();
+        if (inetAddress != null) {
+            String ip = inetAddress.getHostAddress();
+            EndpointInfo mapped = IP_TO_ENDPOINT.get(ip);
+            if (mapped != null) {
+                return mapped;
+            }
         }
 
         return null;
     }
 
-    /**
-     * Registers an explicit endpoint directly (useful for testing and programmatic tunnels).
-     */
     public static void registerEndpoint(String host, int port, boolean useTls, String path) {
         EXPLICIT_ENDPOINTS.put(host.toLowerCase(Locale.ROOT), new EndpointInfo(host, port, useTls, path));
     }
