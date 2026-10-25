@@ -104,14 +104,34 @@ Traditional workarounds come with significant trade-offs:
 
 ---
 
-### Custom Domains & Cloudflare DNS Setup
+### Option C: Using a Custom Domain (Cloudflare Zero Trust)
 
-If you use a custom domain (e.g. `mc.yourdomain.com`) with Cloudflare Zero Trust, configure this TXT record in your Cloudflare DNS dashboard so clients automatically detect the tunnel without typing `wss://`:
+If you own a domain (e.g. `yourdomain.com`) managed on Cloudflare, you can host your server with a clean persistent address (e.g. `mc.yourdomain.com`):
+
+#### 1. In Cloudflare Zero Trust Dashboard:
+1. Navigate to **Networks** -> **Tunnels** -> **Create a Tunnel**.
+2. Select **Cloudflared** and follow the steps to obtain your Tunnel Token.
+3. Under **Public Hostnames**, configure:
+   - **Subdomain**: `mc` (or your preferred subdomain)
+   - **Domain**: `yourdomain.com`
+   - **Type**: `HTTP`
+   - **URL**: `127.0.0.1:25565`
+
+#### 2. In Cloudflare DNS Dashboard:
+Add this TXT record so the MCloud client automatically recognizes your domain without requiring players to type `wss://`:
 
 | Type | Name | Content | TTL |
 | :--- | :--- | :--- | :--- |
 | **TXT** | `_mcloud.mc` | `"mcloud=true"` | Auto |
 | **CNAME** | `mc` | `<your-tunnel-id>.cfargotunnel.com` | Auto (Proxied) |
+
+#### 3. In `config/mcloud.json` (Server Host):
+```json
+{
+  "tunnelMode": "token",
+  "tunnelToken": "your_cloudflare_zero_trust_tunnel_token_here"
+}
+```
 
 ---
 
@@ -122,6 +142,7 @@ If you use a custom domain (e.g. `mc.yourdomain.com`) with Cloudflare Zero Trust
    ```text
    your-domain.trycloudflare.com
    ```
+   *(or your custom domain like `mc.yourdomain.com`)*
 4. Click **Done** and connect. Server status, player count, MOTD, and gameplay work identically to vanilla.
 
 ---
@@ -176,6 +197,17 @@ cd Mcloud
 ```
 
 The compiled mod JAR will be generated at `build/libs/mcloud-1.1.0.jar`.
+
+---
+
+## Disclaimer & Terms of Service Notice
+
+This project is an independent, open-source experimental software developed for educational and networking research purposes.
+
+* **No Affiliation:** This project is not affiliated, associated, authorized, endorsed by, or in any way officially connected with **Cloudflare, Inc.**, **Mojang Studios**, **Microsoft Corporation**, or any of their subsidiaries or affiliates.
+* **Third-Party Services:** This mod interacts with Cloudflare infrastructure via WebSocket tunneling. Users are solely responsible for ensuring that their network traffic, bandwidth consumption, and usage patterns comply with [Cloudflare''s Terms of Service](https://www.cloudflare.com/terms/) and [Self-Serve Subscription Agreement](https://www.cloudflare.com/clean-slate-terms/).
+* **Limitation of Liability:** The authors and contributors of this software accept no responsibility for any temporary or permanent restrictions, tunnel terminations, account suspensions, or service disruptions imposed by third-party network providers resulting from the use of this software.
+* **"As-Is" Warranty:** This software is distributed under the MIT License on an "AS IS" basis, without warranties or conditions of any kind, either express or implied.
 
 ---
 
