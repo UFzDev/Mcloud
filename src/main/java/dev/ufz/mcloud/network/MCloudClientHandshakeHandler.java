@@ -6,6 +6,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
+import io.netty.util.ReferenceCountUtil;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -14,7 +15,7 @@ import java.util.List;
 /**
  * Client-side handler that initiates the RFC 6455 HTTP WebSocket handshake.
  * Holds channelActive downstream until the HTTP 101 Switching Protocols response is received,
- * buffering any initial outbound Minecraft packets until the tunnel is ready.
+ * buffering any initial outbound Minecraft packets or ByteBufs until the tunnel is ready.
  */
 public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
     private final String host;
@@ -24,7 +25,7 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
     private final ByteBuf cumulationBuffer = Unpooled.buffer(2048);
     private final List<QueuedWrite> pendingWrites = new ArrayList<>();
 
-    private record QueuedWrite(ByteBuf msg, ChannelPromise promise) {}
+    private record QueuedWrite(Object msg, ChannelPromise promise) {}
 
     public MCloudClientHandshakeHandler(String host, String path) {
         this.host = host;
@@ -107,9 +108,9 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
 
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
-        if (!handshakeComplete && msg instanceof ByteBuf buf) {
-            // Buffer early Minecraft packets until WebSocket handshake is established
-            pendingWrites.add(new QueuedWrite(buf, promise));
+        if (!handshakeComplete) {
+            // Buffer ANY outbound message (Packet or ByteBuf) until WebSocket handshake is established
+            pendingWrites.add(new QueuedWrite(msg, promise));
         } else {
             ctx.write(msg, promise);
         }
@@ -119,7 +120,7 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
         cumulationBuffer.release();
         for (QueuedWrite qw : pendingWrites) {
-            qw.msg().release();
+            ReferenceCountUtil.safeRelease(qw.msg());
         }
         pendingWrites.clear();
         super.channelInactive(ctx);
