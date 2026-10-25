@@ -25,7 +25,7 @@ import java.lang.reflect.Constructor;
 @Mixin(IntegratedServer.class)
 public class IntegratedServerLanMixin {
 
-    @Inject(method = "publishServer(Lnet/minecraft/world/level/GameType;ZI)Z", at = @At("RETURN"))
+    @Inject(method = "publishServer", at = @At("RETURN"))
     private void mcloud(GameType gameMode, boolean cheats, int port, CallbackInfoReturnable<Boolean> cir) {
         if (!cir.getReturnValue()) {
             return;
