@@ -87,14 +87,69 @@ public class MCloudMod implements ModInitializer {
                             }
                             return 1;
                         }))
-                .then(Commands.literal("start")
+                                .then(Commands.literal("start")
                         .executes(ctx -> {
                             CommandSourceStack src = ctx.getSource();
+                            net.minecraft.server.MinecraftServer server = src.getServer();
+
                             if (CloudflaredManager.isRunning()) {
-                                src.sendFailure(Component.literal("MCloud » Tunnel is already running!").withStyle(ChatFormatting.RED));
+                                String url = CloudflaredManager.getActiveUrl();
+                                String msg = url != null ? "MCloud » Tunnel is already running at: " + url.replace("https://", "") : "MCloud » Tunnel is already running!";
+                                src.sendFailure(Component.literal(msg).withStyle(ChatFormatting.YELLOW));
                                 return 0;
                             }
-                            int port = src.getServer().getPort();
+
+                            // If singleplayer / integrated server and NOT yet published, publish it automatically!
+                            if (!server.isDedicatedServer() && !server.isPublished()) {
+                                int availablePort = net.minecraft.util.HttpUtil.getAvailablePort();
+                                boolean published = false;
+
+                                // Try modern 26.x publishServer(MultiplayerScope, boolean, int)
+                                try {
+                                    for (java.lang.reflect.Method m : server.getClass().getMethods()) {
+                                        if (m.getName().equals("publishServer") && m.getParameterCount() == 3) {
+                                            Class<?> p0 = m.getParameterTypes()[0];
+                                            if (p0.isEnum()) {
+                                                for (Object constant : p0.getEnumConstants()) {
+                                                    if (constant.toString().equals("LAN")) {
+                                                        published = (boolean) m.invoke(server, constant, false, availablePort);
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            if (published) break;
+                                        }
+                                    }
+                                } catch (Throwable ignored) {
+                                }
+
+                                // Try pre-26.x publishServer(GameType, boolean, int)
+                                if (!published) {
+                                    try {
+                                        for (java.lang.reflect.Method m : server.getClass().getMethods()) {
+                                            if (m.getName().equals("publishServer") && m.getParameterCount() == 3) {
+                                                Class<?> p0 = m.getParameterTypes()[0];
+                                                if (p0.getName().endsWith("GameType")) {
+                                                    published = (boolean) m.invoke(server, null, false, availablePort);
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    } catch (Throwable ignored) {
+                                    }
+                                }
+
+                                if (published) {
+                                    src.sendSuccess(() -> Component.literal("MCloud » World opened to LAN on port " + availablePort + "! Starting Cloudflare tunnel...").withStyle(ChatFormatting.GREEN), true);
+                                    // LanServerPingerMixin will automatically handle starting the tunnel and notifying chat
+                                    return 1;
+                                } else {
+                                    src.sendFailure(Component.literal("MCloud » Failed to open LAN world. Please open via World Options.").withStyle(ChatFormatting.RED));
+                                    return 0;
+                                }
+                            }
+
+                            int port = server.getPort();
                             CloudflaredManager.start(port);
                             src.sendSuccess(() -> Component.literal("MCloud » Starting Cloudflare tunnel on port " + port + "...").withStyle(ChatFormatting.GREEN), true);
                             return 1;

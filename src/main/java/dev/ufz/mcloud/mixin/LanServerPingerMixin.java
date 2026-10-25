@@ -184,11 +184,44 @@ public class LanServerPingerMixin {
         return null;
     }
 
-    private static void sendChatMessage(Minecraft mc, Component component) {
-        if (mc.gui != null && mc.gui.getChat() != null) {
-            mc.gui.getChat().addMessage(component);
-        } else if (mc.player != null) {
+        private static void sendChatMessage(Minecraft mc, Component component) {
+        if (mc.player != null) {
             mc.player.sendSystemMessage(component);
+            return;
+        }
+
+        // Adaptive HUD messaging for older / newer GUI architectures
+        try {
+            if (mc.gui != null) {
+                // 1. Try modern 26.x: mc.gui.hud.getChat().addClientSystemMessage(component)
+                try {
+                    java.lang.reflect.Field hudField = mc.gui.getClass().getField("hud");
+                    Object hud = hudField.get(mc.gui);
+                    if (hud != null) {
+                        java.lang.reflect.Method getChatMethod = hud.getClass().getMethod("getChat");
+                        Object chat = getChatMethod.invoke(hud);
+                        if (chat != null) {
+                            java.lang.reflect.Method addClientMsg = chat.getClass().getMethod("addClientSystemMessage", Component.class);
+                            addClientMsg.invoke(chat, component);
+                            return;
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
+
+                // 2. Try pre-26.x: mc.gui.getChat().addMessage(component)
+                try {
+                    java.lang.reflect.Method getChatMethod = mc.gui.getClass().getMethod("getChat");
+                    Object chat = getChatMethod.invoke(mc.gui);
+                    if (chat != null) {
+                        java.lang.reflect.Method addMsg = chat.getClass().getMethod("addMessage", Component.class);
+                        addMsg.invoke(chat, component);
+                        return;
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+        } catch (Throwable ignored) {
         }
     }
 }
