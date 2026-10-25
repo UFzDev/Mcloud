@@ -9,6 +9,9 @@ import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.CorruptedFrameException;
 import io.netty.util.AttributeKey;
 
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
@@ -92,9 +95,25 @@ public class MCloudServerMultiplexer extends ByteToMessageDecoder {
 
         if ("websocket".equalsIgnoreCase(upgrade) && wsKey != null && !wsKey.isBlank()) {
             try {
-                String cfIp = headers.getOrDefault("cf-connecting-ip", headers.getOrDefault("x-forwarded-for", "unknown"));
-                ctx.channel().attr(CF_CLIENT_IP_ATTR).set(cfIp);
-                MCloudMod.LOGGER.info("[MCloud] Upgrading incoming Cloudflare WebSocket connection (Client IP: {})", cfIp);
+                // Security: Only trust CF-Connecting-IP / X-Forwarded-For if connection originates from loopback (cloudflared)
+                String clientIp;
+                SocketAddress remoteAddr = ctx.channel().remoteAddress();
+                boolean isLoopback = (remoteAddr == null || remoteAddr.toString().equals("embedded"));
+                if (remoteAddr instanceof InetSocketAddress inetSocketAddress) {
+                    InetAddress address = inetSocketAddress.getAddress();
+                    if (address != null && (address.isLoopbackAddress() || "127.0.0.1".equals(address.getHostAddress()) || "::1".equals(address.getHostAddress()))) {
+                        isLoopback = true;
+                    }
+                }
+
+                if (isLoopback) {
+                    clientIp = headers.getOrDefault("cf-connecting-ip", headers.getOrDefault("x-forwarded-for", "127.0.0.1"));
+                } else {
+                    clientIp = remoteAddr != null ? remoteAddr.toString() : "unknown";
+                }
+
+                ctx.channel().attr(CF_CLIENT_IP_ATTR).set(clientIp);
+                MCloudMod.LOGGER.info("[MCloud] Upgrading incoming Cloudflare WebSocket connection (Client IP: {})", clientIp);
 
                 String acceptKey = MCloudWebSocketUtil.computeAcceptKey(wsKey);
                 String response = "HTTP/1.1 101 Switching Protocols\r\n"
@@ -131,7 +150,7 @@ public class MCloudServerMultiplexer extends ByteToMessageDecoder {
             }
         } else {
             // Regular HTTP visit (browser or health probe)
-            String body = "{\"status\":\"online\",\"mod\":\"MCloud\",\"version\":\"1.0.4\",\"protocol\":\"RFC6455-WebSocket\",\"info\":\"Use Minecraft 1.20.1 with the MCloud mod to join this server.\"}";
+            String body = "{\"status\":\"online\",\"mod\":\"MCloud\",\"protocol\":\"RFC6455-WebSocket\",\"info\":\"Use Minecraft 1.20.1 with the MCloud mod to join this server.\"}";
             byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
             String httpResponse = "HTTP/1.1 200 OK\r\n"
                     + "Content-Type: application/json; charset=utf-8\r\n"
