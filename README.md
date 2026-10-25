@@ -1,11 +1,6 @@
 # MCloud ??
 
-[![Build & Test](https://github.com/UFzDev/Mcloud/actions/workflows/build.yml/badge.svg)](https://github.com/UFzDev/Mcloud/actions/workflows/build.yml)
-[![GitHub Release](https://img.shields.io/github/v/release/UFzDev/Mcloud?include_prereleases&color=blue&logo=github)](https://github.com/UFzDev/Mcloud/releases)
-[![Minecraft Fabric](https://img.shields.io/badge/Minecraft-1.20.1-brightgreen.svg?logo=curseforge)](https://fabricmc.net/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-> **Zero-Port-Forwarding, Zero-Client-Daemons, Free Cloudflare Tunnel & WebSocket Bridge for Minecraft.**
+Zero-Port-Forwarding, Zero-Client-Daemons, Free Cloudflare Tunnel & WebSocket Bridge for Minecraft (Fabric 1.20.1).
 
 ---
 
@@ -15,7 +10,7 @@ Hosting dedicated Minecraft servers from home frequently fails due to **Carrier-
 
 Traditional alternatives suffer from critical pain points:
 - **Hamachi / Radmin VPN**: Requires all friends to install virtual network adapters, exposes local subnet traffic, and caps network speeds.
-- **Playit.gg / Ngrok**: Strict bandwidth limits, high subscription fees, or inconsistent routing.
+- **Playit.gg / Ngrok**: Bandwidth limits or high subscription fees.
 - **Vanilla Cloudflare Tunnels**: Cloudflare's free tier only proxies **HTTP/HTTPS and WebSockets (port 443)**. Raw TCP tunneling (cloudflared access tcp) requires every player to install CLI daemons and configure custom client proxies.
 
 **MCloud solves this natively at the Netty pipeline layer.** It encapsulates Minecraft’s binary packet stream into secure RFC 6455 WebSocket (wss://) frames over port 443. Connecting players simply paste the Cloudflare tunnel URL into their normal Minecraft multiplayer screen—**no VPNs, no router modifications, and zero external software for clients.**
@@ -58,7 +53,7 @@ Traditional alternatives suffer from critical pain points:
 |     * Native Minecraft TCP -> Direct zero-overhead bypass     |
 |     * HTTP /mcloud Probe -> Health check response             |
 |  - CloudflaredManager: Autonomous tunnel supervisor           |
-+---------------------------------------------------------------+
++-------------------------------+-------------------------------+
 `
 
 ---
@@ -147,10 +142,6 @@ cd Mcloud
 Compiled jar will be located at uild/libs/mcloud-1.0.13.jar.
 
 ---
-
-## ?? Contributing
-
-We welcome contributions! Please check our [CONTRIBUTING.md](CONTRIBUTING.md) and [SPECIFICATION.md](SPECIFICATION.md) before submitting pull requests.
 
 ## ?? License
 
