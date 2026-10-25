@@ -78,18 +78,18 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
                 MCloudMod.LOGGER.info("[MCloud] WebSocket tunnel established successfully to {}", host);
                 handshakeComplete = true;
 
-                // OUTBOUND: Place mcloud_client_ws_encoder before "prepender" (so it wraps the final framed ByteBuf before SSL)
-                // INBOUND: Place mcloud_client_ws_decoder before "splitter" (so it unwraps WebSocket binary payload before Minecraft splitter/decoder)
-                if (ctx.pipeline().get("prepender") != null) {
-                    ctx.pipeline().addBefore("prepender", "mcloud_client_ws_encoder", new MCloudWebSocketFrameEncoder(true));
-                } else {
-                    ctx.pipeline().addBefore(ctx.name(), "mcloud_client_ws_encoder", new MCloudWebSocketFrameEncoder(true));
-                }
+                // Remove handshake handler first so it doesn't interfere
+                ctx.pipeline().remove(this);
 
-                if (ctx.pipeline().get("splitter") != null) {
-                    ctx.pipeline().addBefore("splitter", "mcloud_client_ws_decoder", new MCloudWebSocketFrameDecoder(true));
+                // Install WebSocket codecs directly at the wire level (immediately adjacent to SSL)
+                // Netty Inbound flow: wire -> mcloud_ssl -> mcloud_client_ws_decoder -> timeout -> splitter -> decoder -> packet_handler
+                // Netty Outbound flow: packet_handler -> encoder -> prepender -> mcloud_client_ws_encoder -> mcloud_ssl -> wire
+                if (ctx.pipeline().get("mcloud_ssl") != null) {
+                    ctx.pipeline().addAfter("mcloud_ssl", "mcloud_client_ws_encoder", new MCloudWebSocketFrameEncoder(true));
+                    ctx.pipeline().addAfter("mcloud_ssl", "mcloud_client_ws_decoder", new MCloudWebSocketFrameDecoder(true));
                 } else {
-                    ctx.pipeline().addAfter(ctx.name(), "mcloud_client_ws_decoder", new MCloudWebSocketFrameDecoder(true));
+                    ctx.pipeline().addFirst("mcloud_client_ws_encoder", new MCloudWebSocketFrameEncoder(true));
+                    ctx.pipeline().addFirst("mcloud_client_ws_decoder", new MCloudWebSocketFrameDecoder(true));
                 }
 
                 MCloudMod.LOGGER.info("[MCloud] Client pipeline after installing codecs: {}", ctx.pipeline().names());
@@ -99,9 +99,6 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
                     ByteBuf remainder = cumulationBuffer.readRetainedSlice(cumulationBuffer.readableBytes());
                     ctx.pipeline().context("mcloud_client_ws_decoder").fireChannelRead(remainder);
                 }
-
-                // Remove handshake handler once completed
-                ctx.pipeline().remove(this);
 
                 // Notify Minecraft that connection is now ready to send/receive packets
                 ctx.fireChannelActive();
