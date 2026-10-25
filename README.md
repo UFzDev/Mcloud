@@ -1,5 +1,5 @@
-﻿<p align="center">
-  <img src="assets/header.png?v=2" alt="MCloud Header" width="100%" />
+<p align="center">
+  <img src="assets/header.png?v=banner-flagship" alt="MCloud Header" width="100%" />
 </p>
 
 # MCloud
