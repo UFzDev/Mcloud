@@ -25,9 +25,18 @@ import java.util.Map;
 public class MCloudServerMultiplexer extends ByteToMessageDecoder {
     public static final AttributeKey<String> CF_CLIENT_IP_ATTR = AttributeKey.valueOf("mcloud_cf_client_ip");
     private static final int MAX_HTTP_HEADER_SIZE = 8192;
+    private boolean upgraded = false;
 
     @Override
     protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
+        if (upgraded) {
+            // Already upgraded to WebSocket; forward any remaining bytes to next handler
+            if (in.isReadable()) {
+                out.add(in.readRetainedSlice(in.readableBytes()));
+            }
+            return;
+        }
+
         if (!in.isReadable()) {
             return;
         }
@@ -35,7 +44,7 @@ public class MCloudServerMultiplexer extends ByteToMessageDecoder {
         int firstByte = in.getUnsignedByte(in.readerIndex());
         // 'G' (0x47) for GET or 'H' (0x48) for HEAD
         if (firstByte != 'G' && firstByte != 'H') {
-            // Native Minecraft TCP connection (LAN / direct). Remove multiplexer immediately.
+            // Native Minecraft TCP connection (LAN / direct). Remove multiplexer cleanly.
             ctx.pipeline().remove(this);
             if (in.isReadable()) {
                 out.add(in.readRetainedSlice(in.readableBytes()));
@@ -82,26 +91,47 @@ public class MCloudServerMultiplexer extends ByteToMessageDecoder {
         String wsKey = headers.get("sec-websocket-key");
 
         if ("websocket".equalsIgnoreCase(upgrade) && wsKey != null && !wsKey.isBlank()) {
-            String cfIp = headers.getOrDefault("cf-connecting-ip", headers.getOrDefault("x-forwarded-for", "unknown"));
-            ctx.channel().attr(CF_CLIENT_IP_ATTR).set(cfIp);
-            MCloudMod.LOGGER.info("[MCloud] Upgrading incoming Cloudflare WebSocket connection (Client IP: {})", cfIp);
+            try {
+                String cfIp = headers.getOrDefault("cf-connecting-ip", headers.getOrDefault("x-forwarded-for", "unknown"));
+                ctx.channel().attr(CF_CLIENT_IP_ATTR).set(cfIp);
+                MCloudMod.LOGGER.info("[MCloud] Upgrading incoming Cloudflare WebSocket connection (Client IP: {})", cfIp);
 
-            String acceptKey = MCloudWebSocketUtil.computeAcceptKey(wsKey);
-            String response = "HTTP/1.1 101 Switching Protocols\r\n"
-                    + "Upgrade: websocket\r\n"
-                    + "Connection: Upgrade\r\n"
-                    + "Sec-WebSocket-Accept: " + acceptKey + "\r\n"
-                    + "Server: MCloud/1.0\r\n\r\n";
+                String acceptKey = MCloudWebSocketUtil.computeAcceptKey(wsKey);
+                String response = "HTTP/1.1 101 Switching Protocols\r\n"
+                        + "Upgrade: websocket\r\n"
+                        + "Connection: Upgrade\r\n"
+                        + "Sec-WebSocket-Accept: " + acceptKey + "\r\n"
+                        + "Server: MCloud/1.0\r\n\r\n";
 
-            ByteBuf responseBuf = Unpooled.copiedBuffer(response, StandardCharsets.US_ASCII);
-            ctx.writeAndFlush(responseBuf);
+                ByteBuf responseBuf = Unpooled.copiedBuffer(response, StandardCharsets.US_ASCII);
+                ctx.writeAndFlush(responseBuf);
+                this.upgraded = true;
 
-            // Install WebSocket Frame Encoder and Decoder in place of this multiplexer
-            ctx.pipeline().addBefore(ctx.name(), "mcloud_ws_encoder", new MCloudWebSocketFrameEncoder(false));
-            ctx.pipeline().replace(this, "mcloud_ws_decoder", new MCloudWebSocketFrameDecoder(false));
+                // Defer pipeline mutation to event loop to avoid modifying pipeline inside decode()
+                final ChannelHandlerContext currentCtx = ctx;
+                final ByteBuf remainder = in.isReadable() ? in.readRetainedSlice(in.readableBytes()) : null;
+
+                ctx.channel().eventLoop().execute(() -> {
+                    try {
+                        if (currentCtx.pipeline().context(MCloudServerMultiplexer.this) != null) {
+                            currentCtx.pipeline().addBefore(currentCtx.name(), "mcloud_ws_encoder", new MCloudWebSocketFrameEncoder(false));
+                            currentCtx.pipeline().replace(MCloudServerMultiplexer.this, "mcloud_ws_decoder", new MCloudWebSocketFrameDecoder(false));
+                            MCloudMod.LOGGER.info("[MCloud] WebSocket frame encoder and decoder successfully installed on server channel");
+                            if (remainder != null) {
+                                currentCtx.fireChannelRead(remainder);
+                            }
+                        }
+                    } catch (Exception e) {
+                        MCloudMod.LOGGER.error("[MCloud] Failed to install WebSocket codecs on server pipeline", e);
+                    }
+                });
+            } catch (Exception e) {
+                MCloudMod.LOGGER.error("[MCloud] Exception handling WebSocket upgrade", e);
+                ctx.close();
+            }
         } else {
             // Regular HTTP visit (browser or health probe)
-            String body = "{\"status\":\"online\",\"mod\":\"MCloud\",\"version\":\"1.0.0\",\"protocol\":\"RFC6455-WebSocket\",\"info\":\"Use Minecraft 1.20.1 with the MCloud mod to join this server.\"}";
+            String body = "{\"status\":\"online\",\"mod\":\"MCloud\",\"version\":\"1.0.4\",\"protocol\":\"RFC6455-WebSocket\",\"info\":\"Use Minecraft 1.20.1 with the MCloud mod to join this server.\"}";
             byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
             String httpResponse = "HTTP/1.1 200 OK\r\n"
                     + "Content-Type: application/json; charset=utf-8\r\n"
