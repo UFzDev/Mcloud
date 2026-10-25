@@ -20,6 +20,7 @@ public final class MCloudAddressRegistry {
     private static final Map<String, EndpointInfo> EXPLICIT_ENDPOINTS = new ConcurrentHashMap<>();
     private static final Map<String, EndpointInfo> IP_TO_ENDPOINT = new ConcurrentHashMap<>();
     private static final Set<String> CUSTOM_DOMAINS = ConcurrentHashMap.newKeySet();
+    private static final Map<String, Boolean> DNS_CACHE = new ConcurrentHashMap<>();
 
     private MCloudAddressRegistry() {}
 
@@ -33,6 +34,7 @@ public final class MCloudAddressRegistry {
         EXPLICIT_ENDPOINTS.clear();
         IP_TO_ENDPOINT.clear();
         CUSTOM_DOMAINS.clear();
+        DNS_CACHE.clear();
     }
 
     public static void mapIpToEndpoint(String ip, EndpointInfo endpoint) {
@@ -42,7 +44,8 @@ public final class MCloudAddressRegistry {
     }
 
     /**
-     * Normalizes user-entered server addresses from the Minecraft Multiplayer menu.
+     * Fast, strictly non-blocking string parsing for the Minecraft Multiplayer menu UI/Render thread.
+     * Evaluates only local patterns and memory caches. NEVER performs network/DNS lookups here.
      */
     public static String normalizeServerAddressInput(String rawInput) {
         if (rawInput == null) {
@@ -95,9 +98,9 @@ public final class MCloudAddressRegistry {
         }
 
         String hostLower = host.toLowerCase(Locale.ROOT);
-        boolean isCloudflareAuto = isCloudflareTunnelDomain(hostLower);
+        boolean isKnownTunnel = isKnownTunnelDomain(hostLower);
 
-        if (explicitTls != null || isCloudflareAuto) {
+        if (explicitTls != null || isKnownTunnel) {
             boolean useTls = explicitTls != null ? explicitTls : true;
             int targetPort = explicitPort > 0 ? explicitPort : (useTls ? 443 : 80);
             EXPLICIT_ENDPOINTS.put(hostLower, new EndpointInfo(host, targetPort, useTls, path));
@@ -107,13 +110,38 @@ public final class MCloudAddressRegistry {
         return remainder;
     }
 
-    private static final Map<String, Boolean> DNS_CACHE = new ConcurrentHashMap<>();
+    /**
+     * Fast in-memory check without performing blocking DNS network calls.
+     */
+    public static boolean isKnownTunnelDomain(String hostLower) {
+        if (hostLower == null || hostLower.isBlank()) {
+            return false;
+        }
+        if (hostLower.endsWith(".trycloudflare.com") || hostLower.endsWith(".cfargotunnel.com") || hostLower.endsWith(".workers.dev")) {
+            return true;
+        }
+        for (String custom : CUSTOM_DOMAINS) {
+            if (hostLower.equals(custom) || hostLower.endsWith("." + custom)) {
+                return true;
+            }
+        }
+        // Check if previously resolved by DNS TXT in memory
+        return Boolean.TRUE.equals(DNS_CACHE.get(hostLower));
+    }
 
     /**
      * Checks whether a custom domain has a Cloudflare / MCloud TXT record (_mcloud.domain).
-     * If present, automatically enables WebSocket tunneling without forcing the player to type wss://.
+     * ONLY called from asynchronous background threads (e.g. Netty IO / Server Pinger / Resolver).
      */
-    public static boolean checkDnsTxtRecord(String domain) {
+    /**
+     * Backward-compatible helper method used by background resolver threads.
+     */
+    public static boolean isCloudflareTunnelDomain(String host) {
+        if (host == null || host.isBlank()) return false;
+        String h = host.toLowerCase(Locale.ROOT);
+        return isKnownTunnelDomain(h) || checkDnsTxtRecordAsync(h);
+    }
+    public static boolean checkDnsTxtRecordAsync(String domain) {
         if (domain == null || domain.isBlank()) return false;
         String hostLower = domain.toLowerCase(Locale.ROOT);
         Boolean cached = DNS_CACHE.get(hostLower);
@@ -138,24 +166,10 @@ public final class MCloudAddressRegistry {
         DNS_CACHE.put(hostLower, false);
         return false;
     }
-    public static boolean isCloudflareTunnelDomain(String host) {
-        if (host == null || host.isBlank()) {
-            return false;
-        }
-        String h = host.toLowerCase(Locale.ROOT);
-        if (h.endsWith(".trycloudflare.com") || h.endsWith(".cfargotunnel.com") || h.endsWith(".workers.dev")) {
-            return true;
-        }
-        for (String custom : CUSTOM_DOMAINS) {
-            if (h.equals(custom) || h.endsWith("." + custom)) {
-                return true;
-            }
-        }
-        return checkDnsTxtRecord(h);
-    }
 
     /**
      * Resolves whether an outbound Minecraft connection should use MCloud WebSocket tunneling.
+     * Invoked from Netty / Pinger threads during connect/resolve.
      */
     public static EndpointInfo resolveEndpoint(InetSocketAddress address) {
         if (address == null) {
@@ -172,9 +186,11 @@ public final class MCloudAddressRegistry {
                 return new EndpointInfo(host, port, registered.useTls(), registered.path());
             }
 
-            if (isCloudflareTunnelDomain(hostLower)) {
+            if (isKnownTunnelDomain(hostLower) || checkDnsTxtRecordAsync(hostLower)) {
                 int port = (address.getPort() == 25565 || address.getPort() <= 0) ? 443 : address.getPort();
-                return new EndpointInfo(host, port, true, "/mcloud");
+                EndpointInfo endpoint = new EndpointInfo(host, port, true, "/mcloud");
+                EXPLICIT_ENDPOINTS.put(hostLower, endpoint);
+                return endpoint;
             }
         }
 

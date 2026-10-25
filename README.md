@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="assets/header.png?v=banner-flagship" alt="MCloud Header" width="100%" />
 </p>
 
@@ -101,6 +101,17 @@ Traditional workarounds come with significant trade-offs:
    cloudflared tunnel --url http://127.0.0.1:25565
    ```
 5. Copy the generated domain (e.g. `your-domain.trycloudflare.com`).
+
+---
+
+### Custom Domains & Cloudflare DNS Setup
+
+If you use a custom domain (e.g. `mc.yourdomain.com`) with Cloudflare Zero Trust, configure this TXT record in your Cloudflare DNS dashboard so clients automatically detect the tunnel without typing `wss://`:
+
+| Type | Name | Content | TTL |
+| :--- | :--- | :--- | :--- |
+| **TXT** | `_mcloud.mc` | `"mcloud=true"` | Auto |
+| **CNAME** | `mc` | `<your-tunnel-id>.cfargotunnel.com` | Auto (Proxied) |
 
 ---
 
