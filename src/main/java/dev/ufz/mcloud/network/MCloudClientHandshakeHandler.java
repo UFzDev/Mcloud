@@ -82,24 +82,28 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
                 ctx.pipeline().addBefore(ctx.name(), "mcloud_client_ws_encoder", new MCloudWebSocketFrameEncoder(true));
                 ctx.pipeline().addAfter(ctx.name(), "mcloud_client_ws_decoder", new MCloudWebSocketFrameDecoder(true));
 
-                // Now notify Minecraft's ClientConnection that the connection is ready!
-                ctx.fireChannelActive();
-
-                // Flush pending outbound writes
-                for (QueuedWrite qw : pendingWrites) {
-                    ctx.write(qw.msg(), qw.promise());
-                }
-                pendingWrites.clear();
-                ctx.flush();
-
-                // If any remaining bytes came after \r\n\r\n, forward them into the new WebSocket decoder
+                // If any remaining bytes came after \r\n\r\n, forward them into the new WebSocket decoder BEFORE channelActive
                 if (cumulationBuffer.isReadable()) {
                     ByteBuf remainder = cumulationBuffer.readRetainedSlice(cumulationBuffer.readableBytes());
                     ctx.fireChannelRead(remainder);
                 }
 
-                // Remove handshake handler once completed
+                // Remove handshake handler once completed so it does not intercept subsequent Minecraft packets
                 ctx.pipeline().remove(this);
+
+                // Now notify Minecraft's Connection handler that the channel is active.
+                // In vanilla Minecraft, Connection.channelActive() is what sends the initial Handshake packet!
+                ctx.fireChannelActive();
+
+                // Flush any writes that were buffered
+                if (!pendingWrites.isEmpty()) {
+                    MCloudMod.LOGGER.info("[MCloud] Flushing {} queued outbound packets through pipeline", pendingWrites.size());
+                    for (QueuedWrite qw : pendingWrites) {
+                        ctx.channel().write(qw.msg(), qw.promise());
+                    }
+                    pendingWrites.clear();
+                    ctx.channel().flush();
+                }
             }
         } else {
             ctx.fireChannelRead(msg);
