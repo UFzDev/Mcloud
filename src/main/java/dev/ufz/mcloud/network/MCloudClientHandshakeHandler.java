@@ -5,6 +5,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelPipeline;
 import io.netty.channel.ChannelPromise;
 import io.netty.util.ReferenceCountUtil;
 
@@ -78,39 +79,48 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
                 MCloudMod.LOGGER.info("[MCloud] WebSocket tunnel established successfully to {}", host);
                 handshakeComplete = true;
 
-                // Remove handshake handler first so it doesn't interfere
-                ctx.pipeline().remove(this);
+                ChannelPipeline pipeline = ctx.pipeline();
 
-                // Install WebSocket codecs directly at the wire level (immediately adjacent to SSL)
-                // Netty Inbound flow: wire -> mcloud_ssl -> mcloud_client_ws_decoder -> timeout -> splitter -> decoder -> packet_handler
-                // Netty Outbound flow: packet_handler -> encoder -> prepender -> mcloud_client_ws_encoder -> mcloud_ssl -> wire
-                if (ctx.pipeline().get("mcloud_ssl") != null) {
-                    ctx.pipeline().addAfter("mcloud_ssl", "mcloud_client_ws_encoder", new MCloudWebSocketFrameEncoder(true));
-                    ctx.pipeline().addAfter("mcloud_ssl", "mcloud_client_ws_decoder", new MCloudWebSocketFrameDecoder(true));
+                // Install WebSocket codecs directly adjacent to SSL
+                if (pipeline.get("mcloud_ssl") != null) {
+                    pipeline.addAfter("mcloud_ssl", "mcloud_client_ws_encoder", new MCloudWebSocketFrameEncoder(true));
+                    pipeline.addAfter("mcloud_ssl", "mcloud_client_ws_decoder", new MCloudWebSocketFrameDecoder(true));
                 } else {
-                    ctx.pipeline().addFirst("mcloud_client_ws_encoder", new MCloudWebSocketFrameEncoder(true));
-                    ctx.pipeline().addFirst("mcloud_client_ws_decoder", new MCloudWebSocketFrameDecoder(true));
+                    pipeline.addFirst("mcloud_client_ws_encoder", new MCloudWebSocketFrameEncoder(true));
+                    pipeline.addFirst("mcloud_client_ws_decoder", new MCloudWebSocketFrameDecoder(true));
                 }
 
-                MCloudMod.LOGGER.info("[MCloud] Client pipeline after installing codecs: {}", ctx.pipeline().names());
-
-                // If any remaining bytes came after \r\n\r\n, forward them into the new WebSocket decoder BEFORE channelActive
+                // If any remaining bytes came after \r\n\r\n, forward them into the new WebSocket decoder
                 if (cumulationBuffer.isReadable()) {
                     ByteBuf remainder = cumulationBuffer.readRetainedSlice(cumulationBuffer.readableBytes());
-                    ctx.pipeline().context("mcloud_client_ws_decoder").fireChannelRead(remainder);
+                    pipeline.context("mcloud_client_ws_decoder").fireChannelRead(remainder);
                 }
 
-                // Notify Minecraft that connection is now ready to send/receive packets
-                ctx.fireChannelActive();
+                // Fire channelActive from the pipeline so Connection and all handlers receive it properly!
+                pipeline.fireChannelActive();
 
-                // Flush any writes that were buffered
+                // Now remove the handshake handler from the pipeline cleanly
+                pipeline.remove(this);
+
+                MCloudMod.LOGGER.info("[MCloud] Client pipeline active: {}", pipeline.names());
+
+                // Flush any writes that were buffered during handshake directly through ws_encoder!
                 if (!pendingWrites.isEmpty()) {
-                    MCloudMod.LOGGER.info("[MCloud] Flushing {} queued outbound packets through pipeline", pendingWrites.size());
+                    MCloudMod.LOGGER.info("[MCloud] Flushing {} queued outbound packets through WebSocket encoder", pendingWrites.size());
+                    ChannelHandlerContext wsEncoderCtx = pipeline.context("mcloud_client_ws_encoder");
                     for (QueuedWrite qw : pendingWrites) {
-                        ctx.channel().write(qw.msg(), qw.promise());
+                        if (wsEncoderCtx != null) {
+                            wsEncoderCtx.write(qw.msg(), qw.promise());
+                        } else {
+                            pipeline.write(qw.msg(), qw.promise());
+                        }
                     }
                     pendingWrites.clear();
-                    ctx.channel().flush();
+                    if (wsEncoderCtx != null) {
+                        wsEncoderCtx.flush();
+                    } else {
+                        pipeline.flush();
+                    }
                 }
             }
         } else {
@@ -121,6 +131,7 @@ public class MCloudClientHandshakeHandler extends ChannelDuplexHandler {
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         if (!handshakeComplete) {
+            MCloudMod.LOGGER.info("[MCloud] Buffering outbound write during handshake: {}", msg.getClass().getSimpleName());
             pendingWrites.add(new QueuedWrite(msg, promise));
         } else {
             ctx.write(msg, promise);
