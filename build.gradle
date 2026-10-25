@@ -6,6 +6,7 @@ plugins {
 version = project.version
 group = project.group
 
+remapJar { enabled = false }
 base {
 	archivesName = project.archives_base_name
 }
