@@ -29,7 +29,7 @@ public class IntegratedServerLanMixin {
         }
 
         MCloudMod.LOGGER.info("[MCloud] IntegratedServer opened to LAN on local port {}. Starting Cloudflare tunnel...", port);
-        
+
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) {
             mc.player.sendSystemMessage(
@@ -40,28 +40,31 @@ public class IntegratedServerLanMixin {
         }
 
         CloudflaredManager.start(port, tunnelDomain -> {
-            if (mc.player != null) {
-                Component linkComponent = Component.literal(tunnelDomain)
-                        .withStyle(style -> style
-                                .withColor(ChatFormatting.GREEN)
-                                .withUnderlined(true)
-                                .withBold(true)
-                                .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, tunnelDomain))
-                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("Click to copy tunnel address")))
-                        );
+            // Ensure UI/Chat message is scheduled on Minecraft's main client thread
+            mc.execute(() -> {
+                if (mc.player != null) {
+                    Component linkComponent = Component.literal(tunnelDomain)
+                            .withStyle(style -> style
+                                    .withColor(ChatFormatting.GREEN)
+                                    .withUnderlined(true)
+                                    .withBold(true)
+                                    .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, tunnelDomain))
+                                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("Click to copy tunnel address")))
+                            );
 
-                mc.player.sendSystemMessage(
-                        Component.literal("\n========================================\n")
-                                .withStyle(ChatFormatting.DARK_AQUA)
-                                .append(Component.literal("  [MCloud] PUBLIC WORLD ONLINE!\n").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
-                                .append(Component.literal("  Share this address with your friends:\n").withStyle(ChatFormatting.YELLOW))
-                                .append(Component.literal("  >>> ").withStyle(ChatFormatting.AQUA))
-                                .append(linkComponent)
-                                .append(Component.literal(" <<<\n").withStyle(ChatFormatting.AQUA))
-                                .append(Component.literal("  (Click link to copy directly to clipboard)\n").withStyle(ChatFormatting.DARK_GRAY))
-                                .append(Component.literal("========================================\n").withStyle(ChatFormatting.DARK_AQUA))
-                );
-            }
+                    mc.player.sendSystemMessage(
+                            Component.literal("\n========================================\n")
+                                    .withStyle(ChatFormatting.DARK_AQUA)
+                                    .append(Component.literal("  [MCloud] PUBLIC WORLD ONLINE!\n").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
+                                    .append(Component.literal("  Share this address with your friends:\n").withStyle(ChatFormatting.YELLOW))
+                                    .append(Component.literal("  >>> ").withStyle(ChatFormatting.AQUA))
+                                    .append(linkComponent)
+                                    .append(Component.literal(" <<<\n").withStyle(ChatFormatting.AQUA))
+                                    .append(Component.literal("  (Click link to copy directly to clipboard)\n").withStyle(ChatFormatting.DARK_GRAY))
+                                    .append(Component.literal("========================================\n").withStyle(ChatFormatting.DARK_AQUA))
+                    );
+                }
+            });
         });
     }
 
