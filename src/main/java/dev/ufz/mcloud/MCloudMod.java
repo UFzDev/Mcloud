@@ -10,9 +10,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
-import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,18 +31,18 @@ public class MCloudMod implements ModInitializer {
         // Register /mcloud commands
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> registerCommands(dispatcher));
 
-        // Server lifecycle hooks
+        // Server lifecycle hooks - ONLY auto-start tunnel on DEDICATED servers, not singleplayer worlds!
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
-            if (config.enabled && config.autoStartCloudflared) {
+            if (server.isDedicatedServer() && config.enabled && config.autoStartCloudflared) {
                 int port = server.getPort();
-                LOGGER.info("[MCloud] Server started on port {}. Launching Cloudflare Tunnel...", port);
+                LOGGER.info("[MCloud] Dedicated server started on port {}. Launching Cloudflare Tunnel...", port);
                 CloudflaredManager.start(port);
             }
         });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
-            if (CloudflaredManager.isRunning()) {
-                LOGGER.info("[MCloud] Server stopping. Terminating Cloudflare Tunnel...");
+            if (server.isDedicatedServer() && CloudflaredManager.isRunning()) {
+                LOGGER.info("[MCloud] Dedicated server stopping. Terminating Cloudflare Tunnel...");
                 CloudflaredManager.stop();
             }
         });
@@ -52,7 +50,6 @@ public class MCloudMod implements ModInitializer {
 
     private void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("mcloud")
-                // permission check handled inside execution
                 .then(Commands.literal("status")
                         .executes(ctx -> {
                             CommandSourceStack src = ctx.getSource();
@@ -61,20 +58,7 @@ public class MCloudMod implements ModInitializer {
                                 if (url != null) {
                                     String cleanAddress = url.replace("https://", "");
                                     MutableComponent link = Component.literal(cleanAddress)
-                                            .withStyle(style -> style
-                                                    .withColor(ChatFormatting.AQUA)
-                                                    .withUnderlined(true)
-                                                    .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, cleanAddress))
-                                                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                                            Component.literal("Click to copy address").withStyle(ChatFormatting.GREEN))));
-
-                                    MutableComponent copyBtn = Component.literal(" [COPY]")
-                                            .withStyle(style -> style
-                                                    .withColor(ChatFormatting.GREEN)
-                                                    .withBold(true)
-                                                    .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, cleanAddress))
-                                                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                                            Component.literal("Click to copy address").withStyle(ChatFormatting.GREEN))));
+                                            .withStyle(ChatFormatting.AQUA, ChatFormatting.UNDERLINE);
 
                                     MutableComponent response = Component.empty()
                                             .append(Component.literal("MCloud ").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
@@ -82,8 +66,7 @@ public class MCloudMod implements ModInitializer {
                                             .append(Component.literal("Tunnel is ").withStyle(ChatFormatting.WHITE))
                                             .append(Component.literal("ONLINE\n").withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD))
                                             .append(Component.literal("Address: ").withStyle(ChatFormatting.GRAY))
-                                            .append(link)
-                                            .append(copyBtn);
+                                            .append(link);
 
                                     src.sendSuccess(() -> response, false);
                                 } else {

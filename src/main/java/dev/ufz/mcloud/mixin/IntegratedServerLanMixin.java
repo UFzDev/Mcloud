@@ -5,9 +5,7 @@ import dev.ufz.mcloud.tunnel.CloudflaredManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.server.IntegratedServer;
-import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.level.GameType;
 import org.spongepowered.asm.mixin.Mixin;
@@ -17,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Automatically spawns a Cloudflare tunnel and posts a click-to-copy URL in the player's chat
+ * Automatically spawns a Cloudflare tunnel and posts the public URL in the player's chat
  * when the game is opened to LAN.
  */
 @Mixin(IntegratedServer.class)
@@ -42,34 +40,42 @@ public class IntegratedServerLanMixin {
         CloudflaredManager.start(port, tunnelDomain -> {
             // Ensure UI/Chat message is scheduled on Minecraft's main client thread
             mc.execute(() -> {
-                MutableComponent copyButton = Component.literal("[COPY LINK]")
-                        .withStyle(style -> style
-                                .withColor(ChatFormatting.GREEN)
-                                .withBold(true)
-                                .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, tunnelDomain))
-                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                        Component.literal("Click to copy address to clipboard").withStyle(ChatFormatting.GREEN)))
+                MutableComponent message = null;
+
+                // Try to parse full clickable and copy-to-clipboard JSON text component via registry access
+                if (mc.level != null) {
+                    try {
+                        String rawJson = String.format(
+                                "{\"text\":\"\",\"extra\":["
+                                        + "{\"text\":\"----------------------------------------\\n\",\"color\":\"dark_gray\"},"
+                                        + "{\"text\":\"MCloud \",\"color\":\"gold\",\"bold\":true},"
+                                        + "{\"text\":\"» \",\"color\":\"dark_gray\"},"
+                                        + "{\"text\":\"Public world is now ONLINE!\\n\",\"color\":\"white\",\"bold\":true},"
+                                        + "{\"text\":\"Address: \",\"color\":\"gray\"},"
+                                        + "{\"text\":\"%s\",\"color\":\"aqua\",\"underlined\":true,\"clickEvent\":{\"action\":\"copy_to_clipboard\",\"value\":\"%s\"},\"hoverEvent\":{\"action\":\"show_text\",\"value\":\"Click to copy address\"}},"
+                                        + "{\"text\":\"  \"},"
+                                        + "{\"text\":\"[COPY LINK]\",\"color\":\"green\",\"bold\":true,\"clickEvent\":{\"action\":\"copy_to_clipboard\",\"value\":\"%s\"},\"hoverEvent\":{\"action\":\"show_text\",\"value\":\"Click to copy address\"}},"
+                                        + "{\"text\":\"\\n----------------------------------------\",\"color\":\"dark_gray\"}"
+                                        + "]}",
+                                tunnelDomain, tunnelDomain, tunnelDomain
                         );
 
-                MutableComponent domainText = Component.literal(tunnelDomain)
-                        .withStyle(style -> style
-                                .withColor(ChatFormatting.AQUA)
-                                .withUnderlined(true)
-                                .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, tunnelDomain))
-                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                        Component.literal("Click to copy address to clipboard").withStyle(ChatFormatting.GREEN)))
-                        );
+                        message = Component.Serializer.fromJson(rawJson, mc.level.registryAccess());
+                    } catch (Throwable t) {
+                        MCloudMod.LOGGER.warn("[MCloud] Registry-aware JSON parsing failed, using clean fallback", t);
+                    }
+                }
 
-                MutableComponent message = Component.empty()
-                        .append(Component.literal("----------------------------------------\n").withStyle(ChatFormatting.DARK_GRAY))
-                        .append(Component.literal("MCloud ").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
-                        .append(Component.literal("» ").withStyle(ChatFormatting.DARK_GRAY))
-                        .append(Component.literal("Public world is now ONLINE!\n").withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD))
-                        .append(Component.literal("Address: ").withStyle(ChatFormatting.GRAY))
-                        .append(domainText)
-                        .append(Component.literal("  "))
-                        .append(copyButton)
-                        .append(Component.literal("\n----------------------------------------").withStyle(ChatFormatting.DARK_GRAY));
+                if (message == null) {
+                    message = Component.empty()
+                            .append(Component.literal("----------------------------------------\n").withStyle(ChatFormatting.DARK_GRAY))
+                            .append(Component.literal("MCloud ").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
+                            .append(Component.literal("» ").withStyle(ChatFormatting.DARK_GRAY))
+                            .append(Component.literal("Public world is now ONLINE!\n").withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD))
+                            .append(Component.literal("Address: ").withStyle(ChatFormatting.GRAY))
+                            .append(Component.literal(tunnelDomain).withStyle(ChatFormatting.AQUA, ChatFormatting.UNDERLINE))
+                            .append(Component.literal("\n----------------------------------------").withStyle(ChatFormatting.DARK_GRAY));
+                }
 
                 sendChatMessage(mc, message);
             });
